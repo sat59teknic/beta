@@ -1,0 +1,13 @@
+{
+  "name": "beta10-cloudflare",
+  "version": "1.0.0",
+  "description": "Beta10 Control con Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

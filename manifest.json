@@ -1,0 +1,21 @@
+{
+    "name": "Beta10 Control Jornada",
+    "short_name": "Beta10",
+    "description": "Aplicación para el control de jornada en Beta10.",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#f0f2f5",
+    "theme_color": "#007aff",
+    "icons": [
+        {
+            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiByeD0iMzgiIGZpbGw9IiMwMDdhZmYiLz4KPHBhdGggZD0iTTk2IDQ4QzEyMC4zIDQ4IDEzNiA2My43IDEzNiA4OFYxMDRDMTM2IDEyOC4zIDEyMC4zIDE0NCA5NiAxNDRINzJDNjcuNiAxNDQgNjQgMTQwLjQgNjQgMTM2VjU2QzY0IDUxLjYgNjcuNiA0OCA3MiA0OEg5NloiIGZpbGw9IndoaXRlIi8+CjxjaXJjbGUgY3g9Ijk2IiBjeT0iOTYiIHI9IjE2IiBmaWxsPSIjMDA3YWZmIi8+Cjwvc3ZnPgo=",
+            "type": "image/svg+xml",
+            "sizes": "192x192"
+        },
+        {
+            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTAyIiBmaWxsPSIjMDA3YWZmIi8+CjxwYXRoIGQ9Ik0yNTYgMTI4QzMyMC44IDEyOCAzNjggMTc1LjIgMzY4IDI0MFYyNzJDMzY4IDMzNi44IDMyMC44IDM4NCAyNTYgMzg0SDE5MkMxODAuOCAzODQgMTcyIDM3NS4yIDE3MiAzNjRWMTQ4QzE3MiAxMzYuOCAxODAuOCAxMjggMTkyIDEyOEgyNTZaIiBmaWxsPSJ3aGl0ZSIvPgo8Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjQyIiBmaWxsPSIjMDA3YWZmIi8+Cjwvc3ZnPgo=",
+            "type": "image/svg+xml",
+            "sizes": "512x512"
+        }
+    ]
+}

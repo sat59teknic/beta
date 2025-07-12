@@ -1,0 +1,12 @@
+name = "beta10-control"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+# Configurar estas variables en el dashboard de Cloudflare
+# BETA10_USERNAME = "tu_usuario"
+# BETA10_PASSWORD = "tu_password"
+
+[[kv_namespaces]]
+binding = "BETA10_KV"
+id = "your-kv-namespace-id"
