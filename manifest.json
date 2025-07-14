@@ -1,21 +1,40 @@
 {
-    "name": "Beta10 Control Jornada",
-    "short_name": "Beta10",
-    "description": "Aplicación para el control de jornada en Beta10.",
-    "start_url": ".",
+    "name": "9T Beta10 Control",
+    "short_name": "9T Beta10",
+    "description": "Control de jornada Beta10 - 9Teknic",
+    "start_url": "/",
     "display": "standalone",
-    "background_color": "#f0f2f5",
-    "theme_color": "#007aff",
+    "background_color": "#1a1a1a",
+    "theme_color": "#e74c3c",
+    "orientation": "portrait",
+    "scope": "/",
     "icons": [
         {
-            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiByeD0iMzgiIGZpbGw9IiMwMDdhZmYiLz4KPHBhdGggZD0iTTk2IDQ4QzEyMC4zIDQ4IDEzNiA2My43IDEzNiA4OFYxMDRDMTM2IDEyOC4zIDEyMC4zIDE0NCA5NiAxNDRINzJDNjcuNiAxNDQgNjQgMTQwLjQgNjQgMTM2VjU2QzY0IDUxLjYgNjcuNiA0OCA3MiA0OEg5NloiIGZpbGw9IndoaXRlIi8+CjxjaXJjbGUgY3g9Ijk2IiBjeT0iOTYiIHI9IjE2IiBmaWxsPSIjMDA3YWZmIi8+Cjwvc3ZnPgo=",
+            "src": "icon-192.svg",
             "type": "image/svg+xml",
-            "sizes": "192x192"
+            "sizes": "192x192",
+            "purpose": "any maskable"
         },
         {
-            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTAyIiBmaWxsPSIjMDA3YWZmIi8+CjxwYXRoIGQ9Ik0yNTYgMTI4QzMyMC44IDEyOCAzNjggMTc1LjIgMzY4IDI0MFYyNzJDMzY4IDMzNi44IDMyMC44IDM4NCAyNTYgMzg0SDE5MkMxODAuOCAzODQgMTcyIDM3NS4yIDE3MiAzNjRWMTQ4QzE3MiAxMzYuOCAxODAuOCAxMjggMTkyIDEyOEgyNTZaIiBmaWxsPSJ3aGl0ZSIvPgo8Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjQyIiBmaWxsPSIjMDA3YWZmIi8+Cjwvc3ZnPgo=",
+            "src": "icon-512.svg", 
             "type": "image/svg+xml",
-            "sizes": "512x512"
+            "sizes": "512x512",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZ0dyYWRpZW50IiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMWExYTFhO3N0b3Atb3BhY2l0eToxIiAvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6IzJkMmQyZDtzdG9wLW9wYWNpdHk6MSIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjM4IiBmaWxsPSJ1cmwoI2JnR3JhZGllbnQpIi8+PHRleHQgeD0iNjUiIHk9IjEzMCIgZm9udC1mYW1pbHk9IkFyaWFsIEJsYWNrLCBzYW5zLXNlcmlmIiBmb250LXNpemU9Ijg1IiBmb250LXdlaWdodD0iOTAwIiBmaWxsPSIjZTc0YzNjIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj45PC90ZXh0Pjx0ZXh0IHg9IjEyNyIgeT0iMTMwIiBmb250LWZhbWlseT0iQXJpYWwgQmxhY2ssIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iODUiIGZvbnQtd2VpZ2h0PSI5MDAiIGZpbGw9IiMyYzNlNTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlQ8L3RleHQ+PHRleHQgeD0iOTYiIHk9IjE2NSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYmRjM2M3Ij5CRVRBMTA8L3RleHQ+PC9zdmc+",
+            "type": "image/svg+xml",
+            "sizes": "any",
+            "purpose": "any"
+        }
+    ],
+    "categories": ["productivity", "business"],
+    "screenshots": [
+        {
+            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIwIiBoZWlnaHQ9IjY0MCIgdmlld0JveD0iMCAwIDMyMCA2NDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjMyMCIgaGVpZ2h0PSI2NDAiIGZpbGw9IiNmMGYyZjUiLz48cmVjdCB4PSIyMCIgeT0iNjAiIHdpZHRoPSIyODAiIGhlaWdodD0iNTAwIiByeD0iMjAiIGZpbGw9IndoaXRlIi8+PHRleHQgeD0iMTYwIiB5PSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMxYzFjMWUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iYm9sZCI+OVQgQmV0YTEwIENvbnRyb2w8L3RleHQ+PC9zdmc+",
+            "sizes": "320x640",
+            "type": "image/svg+xml",
+            "form_factor": "narrow"
         }
     ]
 }

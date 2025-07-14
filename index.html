@@ -3,30 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Beta10 Control</title>
+    <title>9T Beta10 Control</title>
     
     <!-- PWA / Mobile App Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Beta10 Control">
-    <meta name="theme-color" content="#f0f2f5">
-    <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
+    <meta name="theme-color" content="#e74c3c">
+    <link rel="apple-touch-icon" href="icon-192.svg">
+    <link rel="icon" href="icon-192.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.json">
 
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="auth.css">
+    <script src="auth.js"></script>
     <script src="script.js" defer></script>
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <div id="connection-status" class="status-indicator" title="Estado de la conexión"></div>
-            <h1>Control de Jornada</h1>
-            <div id="gps-status" class="status-indicator" title="Estado del GPS"></div>
+            <div id="connection-status" class="status-indicator" title="Estat de la connexió"></div>
+            <h1>
+                <span class="logo-text">
+                    <span class="nine-text">9</span><span class="t-text">T</span>
+                </span>
+                Beta10
+            </h1>
+            <div id="gps-status" class="status-indicator" title="Estat del GPS"></div>
         </header>
 
         <main class="main-content">
             <div class="status-card">
-                <p>Estado Actual</p>
+                <p>Estat Actual</p>
                 <h2 id="current-state-text">--</h2>
             </div>
 
@@ -42,6 +50,8 @@
             </div>
             
             <div id="info-message" class="info-message"></div>
+            
+
         </main>
         
         <div id="button-container" class="button-container">
@@ -49,14 +59,14 @@
         </div>
 
         <div class="log-card">
-            <h3>Registro de Actividad</h3>
+            <h3>Registre d'Activitat</h3>
             <div id="log-container"></div>
         </div>
     </div>
     
     <div id="loading-overlay" class="loading-overlay">
         <div class="spinner"></div>
-        <p id="loading-text">Conectando...</p>
+        <p id="loading-text">Connectant...</p>
     </div>
 </body>
 </html>

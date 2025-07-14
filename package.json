@@ -1,13 +1,20 @@
 {
-  "name": "beta10-cloudflare",
+  "name": "beta10-vercel-browserless",
   "version": "1.0.0",
-  "description": "Beta10 Control con Cloudflare Workers",
+  "description": "Control de jornada Beta10 - Vercel + Browserless (Ultra-rápido)",
+  "main": "api/beta10.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "build": "echo 'Build completed'",
+    "dev": "vercel dev"
   },
-  "devDependencies": {
-    "wrangler": "^3.0.0"
-  }
+  "engines": {
+    "node": "18"
+  },
+  "keywords": [
+    "beta10",
+    "vercel",
+    "browserless"
+  ],
+  "author": "Beta10 Control",
+  "license": "MIT"
 }
