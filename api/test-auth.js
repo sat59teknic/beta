@@ -30,32 +30,66 @@ module.exports = async function handler(req, res) {
 
         console.log(`🔐 Test credencials per usuari: ${username}`);
         
-        // Test ràpid de login a Beta10
+        // Test ràpid de login a Beta10 amb més debugging
         const baseUrl = 'https://9teknic.movilidadbeta10.es:9001/';
+        
+        console.log('🌐 Carregant pàgina de login...');
         
         // Carregar pàgina de login
         const loginResponse = await fetch(baseUrl, {
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
             }
         });
         
         if (!loginResponse.ok) {
+        console.error(`❌ Error carregant Beta10: HTTP ${loginResponse.status}`);
             throw new Error(`Error carregant Beta10: HTTP ${loginResponse.status}`);
         }
         
-        const loginHTML = await loginResponse.text();
+        // Obtenir cookies de la resposta inicial
+        const setCookieHeaders = loginResponse.headers.get('set-cookie');
+        let sessionCookies = '';
+        if (setCookieHeaders) {
+            sessionCookies = setCookieHeaders.split(',').map(cookie => cookie.split(';')[0]).join('; ');
+            console.log('🍪 Cookies obtingudes:', sessionCookies.substring(0, 100) + '...');
+        }
         
-        // Extreure token CSRF
-        const csrfMatch = loginHTML.match(/name=['"]csrfmiddlewaretoken['"][^>]*value=['"]([^'"]+)['"]/);
-        const csrfToken = csrfMatch ? csrfMatch[1] : null;
+        const loginHTML = await loginResponse.text();
+        console.log('📄 HTML rebut:', loginHTML.length, 'chars');
+        
+        // Extreure token CSRF amb més patrons
+        let csrfToken = null;
+        const csrfPatterns = [
+            /name=['"]csrfmiddlewaretoken['"][^>]*value=['"]([^'"]+)['"]/,
+            /value=['"]([^'"]+)['"][^>]*name=['"]csrfmiddlewaretoken['"]/,
+            /<input[^>]*csrfmiddlewaretoken[^>]*value=['"]([^'"]+)['"]/
+        ];
+        
+        for (const pattern of csrfPatterns) {
+            const match = loginHTML.match(pattern);
+            if (match) {
+                csrfToken = match[1];
+                break;
+            }
+        }
         
         if (!csrfToken) {
+            console.error('❌ Token CSRF no trobat al HTML');
+            console.log('🔍 Inici HTML:', loginHTML.substring(0, 500));
             throw new Error('Token CSRF no trobat');
         }
         
-        // Fer login de prova
+        console.log('✅ Token CSRF trobat:', csrfToken.substring(0, 10) + '...');
+        
+        // Fer login de prova amb totes les cookies i headers
         const loginData = new URLSearchParams({
             'csrfmiddlewaretoken': csrfToken,
             'username': username,
@@ -67,7 +101,15 @@ module.exports = async function handler(req, res) {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Referer': baseUrl,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'Origin': 'https://9teknic.movilidadbeta10.es:9001',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Cookie': sessionCookies
             },
             body: loginData.toString(),
             redirect: 'manual'
@@ -76,8 +118,31 @@ module.exports = async function handler(req, res) {
         const authStatus = authResponse.status;
         const authLocation = authResponse.headers.get('location');
         
-        // Verificar èxit del login
-        const loginSuccess = authStatus === 302 && authLocation && authLocation !== baseUrl;
+        console.log('📊 Resultat login:');
+        console.log('  Status:', authStatus);
+        console.log('  Location:', authLocation);
+        
+        // Verificar èxit del login amb més validacions
+        let loginSuccess = false;
+        
+        if (authStatus === 302) {
+            // Redirect positiu - verificar que no sigui de vuelta al login
+            if (authLocation && !authLocation.includes('/login') && authLocation !== baseUrl) {
+                loginSuccess = true;
+                console.log('✅ Login exitoso - redirect vàlid');
+            } else {
+                console.log('❌ Login fallit - redirect a login');
+            }
+        } else if (authStatus === 200) {
+            // Potser és successful sense redirect - verificar contingut
+            const authHTML = await authResponse.text();
+            if (!authHTML.includes('username') || !authHTML.includes('password')) {
+                loginSuccess = true;
+                console.log('✅ Login exitoso - sense redirect');
+            } else {
+                console.log('❌ Login fallit - encara mostra formulari');
+            }
+        }
         
         if (loginSuccess) {
             console.log(`✅ Test login exitós per: ${username}`);
