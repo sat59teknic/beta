@@ -97,42 +97,42 @@ class AuthManager {
                         <div class="auth-logo">
                             <span class="nine-text">9</span><span class="t-text">T</span>
                         </div>
-                        <h2>Beta10 Control</h2>
-                        <p>Introduce tus credenciales de Beta10</p>
+                        <h2>9T Beta10 Control</h2>
+                        <p>Introdueix les teves credencials de Beta10</p>
                     </div>
                     
                     <form class="auth-form" id="loginForm">
                         <div class="auth-field">
-                            <label for="auth-username">Usuario Beta10</label>
-                            <input type="text" id="auth-username" placeholder="Tu usuario" required autocomplete="username" />
+                            <label for="auth-username">Usuari Beta10</label>
+                            <input type="text" id="auth-username" placeholder="El teu usuari" required autocomplete="username" />
                         </div>
                         
                         <div class="auth-field">
-                            <label for="auth-password">Contraseña</label>
-                            <input type="password" id="auth-password" placeholder="Tu contraseña" required autocomplete="current-password" />
+                            <label for="auth-password">Contrasenya</label>
+                            <input type="password" id="auth-password" placeholder="La teva contrasenya" required autocomplete="current-password" />
                         </div>
                         
                         <div class="auth-field">
                             <label class="auth-checkbox">
                                 <input type="checkbox" id="auth-remember" checked />
                                 <span class="checkmark"></span>
-                                Recordar credenciales en este dispositivo
+                                Recordar credencials en aquest dispositiu
                             </label>
                         </div>
                         
                         <div class="auth-buttons">
                             <button type="submit" class="auth-btn auth-btn-primary">
-                                <span class="auth-btn-text">Iniciar Sesión</span>
+                                <span class="auth-btn-text">Iniciar Sessió</span>
                                 <div class="auth-btn-loading" style="display: none;">
                                     <div class="auth-spinner"></div>
-                                    Verificando...
+                                    Verificant...
                                 </div>
                             </button>
                         </div>
                     </form>
                     
                     <div class="auth-footer">
-                        <p><small>Las credenciales se almacenan de forma segura solo en tu dispositivo</small></p>
+                        <p><small>Les credencials s'emmagatzemen de forma segura només al teu dispositiu</small></p>
                     </div>
                 </div>
             `;
@@ -227,8 +227,8 @@ class AuthManager {
             const result = await response.json();
             return result;
         } catch (error) {
-            console.error('Error probando credenciales:', error);
-            return { success: false, error: 'Error de conexión' };
+            console.error('Error provant credencials:', error);
+            return { success: false, error: 'Error de connexió amb el servidor' };
         }
     }
 
