@@ -8,20 +8,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     //
 
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
-    console.log('🔐 Verificando autenticación...');
+    console.log('🔐 Verificant autenticació...');
+    
+    // Probar conectividad con el backend primero
+    try {
+        const healthResponse = await fetch('/api/health');
+        const healthData = await healthResponse.json();
+        console.log('✅ Backend connectat:', healthData.message);
+    } catch (error) {
+        console.error('❌ Error de connectivitat backend:', error);
+        alert('Error: No es pot connectar amb el servidor. Comprova la connexió.');
+        return;
+    }
     
     if (!authManager.hasValidCredentials()) {
-        console.log('🔐 No hay credenciales. Mostrando login...');
+        console.log('🔐 No hi ha credencials. Mostrant login...');
         try {
             await authManager.showLoginScreen();
-            console.log('✅ Usuario autenticado correctamente');
+            console.log('✅ Usuari autenticat correctament');
         } catch (error) {
-            console.error('❌ Error en autenticación:', error);
-            alert('Error de autenticación. Recarga la página.');
+            console.error('❌ Error en autenticació:', error);
+            alert('Error d\'autenticació. Recarrega la pàgina.');
             return;
         }
     } else {
-        console.log('✅ Credenciales encontradas. Usuario ya autenticado.');
+        console.log('✅ Credencials trobades. Usuari ja autenticat.');
     }
 
     // Añadir botón de cuenta al header
