@@ -12,90 +12,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Probar conectividad con el backend primero
     try {
-        const healthResponse = await fetch('/api/health', {
-            method: 'GET',
-            cache: 'no-cache'
-        }
-    
-    function playAlarm() {
-        if (!appState.isAlarmPlaying) {
-            appState.isAlarmPlaying = true;
-            
-            // Activar Wake Lock per mantenir dispositiu despert
-            requestWakeLock();
-            
-            const pauseTypeText = appState.currentPauseType ? ` de ${appState.currentPauseType}` : '';
-            const alarmMinutes = Math.round((appState.pauseAlarmTime || PAUSE_ALARM_THRESHOLD) / 60000);
-            
-            dom.infoMessage.textContent = `⚠️ Temps de pausa${pauseTypeText} excedit (${alarmMinutes} min)! Torna a jornada quan puguis.`;
-            dom.infoMessage.classList.add('alert');
-            
-            // Vibrar el mòbil de forma més intensa
-            if ('vibrate' in navigator) {
-                navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
-            }
-            
-            // Intentar notificació push si està disponible
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('9T Beta10 - Pausa excedit!', {
-                    body: `Temps de pausa${pauseTypeText} excedit (${alarmMinutes} min). Torna a jornada.`,
-                    icon: '/icon-192.svg',
-                    vibrate: [1000, 300, 1000, 300, 1000]
-                });
-            }
-            
-            // Reproduir sonido cada 15 segundos (més persistent)
-            const alarmInterval = setInterval(() => {
-                if (appState.isAlarmPlaying) {
-                    createBeepSound();
-                    
-                    // Vibrar de nou
-                    if ('vibrate' in navigator) {
-                        navigator.vibrate([500, 200, 500]);
-                    }
-                } else {
-                    clearInterval(alarmInterval);
-                }
-            }, 15000); // Cada 15 segons
-            
-            createBeepSound(); // Primer sonido inmediato
-            logActivity(`🚨 Alarma activada: ${pauseTypeText} - ${alarmMinutes} min`);
-        }
-    }
-
-    function stopAlarm() {
-        appState.isAlarmPlaying = false;
-        dom.infoMessage.classList.remove('alert');
-        dom.infoMessage.textContent = "";
-        
-        // Alliberar Wake Lock quan s'aturi l'alarma
-        releaseWakeLock();
-        
-        logActivity('🔕 Alarma aturada - tornat a jornada');
-    });
-        
-        if (!healthResponse.ok) {
-            throw new Error(`Servidor no disponible (${healthResponse.status})`);
-        }
-        
+        const healthResponse = await fetch('/api/health');
         const healthData = await healthResponse.json();
         console.log('✅ Backend connectat:', healthData.message);
     } catch (error) {
         console.error('❌ Error de connectivitat backend:', error);
-        
-        let errorMessage = 'Error de connexió desconegut';
-        
-        if (error.name === 'TypeError' || error.message.includes('fetch')) {
-            errorMessage = 'No tens connexió a internet. Comprova la teva connexió i torna a intentar-ho.';
-        } else if (error.message.includes('500')) {
-            errorMessage = 'El servidor té problemes. Prova més tard.';
-        } else if (error.message.includes('404')) {
-            errorMessage = 'Servei no trobat. Contacta amb l\'administrador.';
-        } else if (error.message.includes('Servidor no disponible')) {
-            errorMessage = 'El servidor no està disponible en aquest moment.';
-        }
-        
-        alert(`❌ Error de Connexió\n\n${errorMessage}`);
+        alert('Error: No es pot connectar amb el servidor. Comprova la connexió.');
         return;
     }
     
@@ -141,9 +63,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
         workStartTime: null,
         currentPauseStart: null,
-        currentPauseType: null, // 'esmorçar' o 'dinar'
-        pauseMinTime: null,     // 10 o 15 min segons tipus
-        pauseAlarmTime: null,   // 14 o 30 min segons tipus
         totalPauseTimeToday: 0,
         currentLocation: null,
         isAlarmPlaying: false,
@@ -212,24 +131,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 },
                 (error) => {
                     let errorMsg = 'Error GPS desconegut.';
-                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita la ubicació a la configuració del navegador.';
-                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert amb millor cobertura.';
-                    if (error.code === 3) errorMsg = 'Temps d\'espera GPS excedit. Torna a intentar-ho.';
+                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita\'l a configuració.';
+                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert.';
+                    if (error.code === 3) errorMsg = 'Timeout de GPS. Reintenta.';
                     dom.gpsStatus.className = 'status-indicator red';
                     reject(new Error(errorMsg));
                 },
                 { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
             );
         });
-    }
-
-    // Funció per afegir observacions manualment
-    async function addObservationsManually() {
-        const observations = await showObservationsModal();
-        if (observations.trim()) {
-            logActivity(`📝 Observacions afegides: ${observations}`);
-            // Aquí podrías enviar las observaciones a un endpoint específico si fuera necesario
-        }
     }
 
     // Función para mostrar modal de observaciones
@@ -355,23 +265,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         } catch (error) {
             dom.connectionStatus.className = 'status-indicator red';
-            
-            let userFriendlyError = 'Error de connexió desconegut';
-            
-            if (error.name === 'TypeError' || error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
-                userFriendlyError = 'No tens connexió a internet. Comprova la connexió i torna a intentar-ho.';
-            } else if (error.message.includes('timeout') || error.message.includes('aborted')) {
-                userFriendlyError = 'La connexió és massa lenta. Torna a intentar-ho.';
-            } else if (error.message.includes('500')) {
-                userFriendlyError = 'Error del servidor. Prova més tard.';
-            } else if (error.message.includes('401') || error.message.includes('403')) {
-                userFriendlyError = 'Credencials incorrectes. Torna a fer login.';
-            } else if (error.message.includes('404')) {
-                userFriendlyError = 'Servei no disponible. Contacta amb suport.';
-            }
-            
-            logActivity(`❌ ERROR: ${userFriendlyError}`);
-            throw new Error(userFriendlyError);
+            logActivity(`❌ ERROR: ${error.message}`);
+            throw error;
         } finally {
             showLoading(false);
         }
@@ -411,8 +306,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             
-            for (const { action, point, newState, observations, onComplete } of actions) {
-                await sendToProxy(action, point, observations || '');
+            for (const { action, point, newState, onComplete } of actions) {
+                await sendToProxy(action, point, observations);
                 if (newState) appState.currentState = newState;
                 if (onComplete) onComplete();
                 saveState();
@@ -424,49 +319,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Funció per mostrar modal de tipus de pausa
-    function showPauseTypeModal() {
-        return new Promise((resolve) => {
-            const modal = document.createElement('div');
-            modal.className = 'modal-overlay';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <h3>Tipus de Pausa</h3>
-                    <p>Selecciona el tipus de pausa que vols fer:</p>
-                    
-                    <div class="pause-type-buttons">
-                        <button class="btn btn-secondary pause-type-btn" data-type="esmorçar">
-                            🥐 Esmorçar
-                            <small>(10 min mínim)</small>
-                        </button>
-                        <button class="btn btn-secondary pause-type-btn" data-type="dinar">
-                            🍽️ Dinar
-                            <small>(15 min mínim)</small>
-                        </button>
-                    </div>
-                    
-                    <div class="modal-buttons">
-                        <button class="btn btn-secondary" onclick="closePauseTypeModal(null)">Cancel·lar</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            
-            // Manejar clics en los botones de tipo
-            const typeButtons = modal.querySelectorAll('.pause-type-btn');
-            typeButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const type = btn.getAttribute('data-type');
-                    closePauseTypeModal(type);
-                });
-            });
-            
-            window.closePauseTypeModal = (selectedType) => {
-                document.body.removeChild(modal);
-                resolve(selectedType);
-                delete window.closePauseTypeModal;
-            };
-        });
+    // Función para añadir observaciones manualmente
+    async function addObservationsManually() {
+        const observations = await showObservationsModal();
+        if (observations.trim()) {
+            logActivity(`📝 Observacions afegides: ${observations}`);
+            // Aquí podrías enviar las observaciones a un endpoint específico si fuera necesario
+        }
     }
 
     function startWorkday() {
@@ -494,62 +353,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         ]);
     }
 
-    async function startPause() {
-        try {
-            // Mostrar modal per seleccionar tipus de pausa
-            const pauseType = await showPauseTypeModal();
-            
-            if (!pauseType) {
-                // L'usuari va cancel·lar
-                return;
-            }
-            
-            // Configurar temps segons el tipus de pausa
-            let minTime, alarmTime;
-            if (pauseType === 'esmorçar') {
-                minTime = 10 * 60 * 1000;  // 10 minuts
-                alarmTime = 14 * 60 * 1000; // 14 minuts
-            } else { // 'dinar'
-                minTime = 15 * 60 * 1000;  // 15 minuts
-                alarmTime = 30 * 60 * 1000; // 30 minuts
-            }
-            
-            // Guardar configuració de pausa
-            appState.currentPauseType = pauseType;
-            appState.pauseMinTime = minTime;
-            appState.pauseAlarmTime = alarmTime;
-            
-            // Executar transició amb observacions automàtiques
-            await handleAction([
-                { action: 'salida', point: 'J' },
-                {
-                    action: 'entrada', 
-                    point: 'P', 
-                    newState: 'PAUSA',
-                    observations: pauseType, // Afegir automàticament
-                    onComplete: () => { 
-                        appState.currentPauseStart = new Date();
-                        // Resetear alarmas para nueva pausa
-                        appState.minPauseAlarmTriggered = false;
-                        appState.isMinPauseAlarmPlaying = false;
-                        appState.isAlarmPlaying = false;
-                        logActivity(`🍽️ Pausa iniciada: ${pauseType} (mínim ${minTime / 60000} min)`);
-                    }
+    function startPause() {
+        handleAction([
+            { action: 'salida', point: 'J' },
+            {
+                action: 'entrada', point: 'P', newState: 'PAUSA',
+                onComplete: () => { 
+                    appState.currentPauseStart = new Date();
+                    // Resetear alarmas para nueva pausa
+                    appState.minPauseAlarmTriggered = false;
+                    appState.isMinPauseAlarmPlaying = false;
                 }
-            ]);
-            
-        } catch (error) {
-            console.error('Error iniciant pausa:', error);
-            alert('Error iniciant la pausa. Torna a intentar-ho.');
-        }
+            }
+        ]);
     }
 
     function endPause() {
-        // Obtenir el tipus de pausa actual per enviar com a observació
-        const pauseObservation = appState.currentPauseType || '';
-        
         handleAction([
-            { action: 'salida', point: 'P', observations: pauseObservation },
+            { action: 'salida', point: 'P' },
             {
                 action: 'entrada', point: 'J', newState: 'JORNADA',
                 onComplete: () => {
@@ -557,18 +378,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                         const pauseDuration = new Date() - appState.currentPauseStart;
                         appState.totalPauseTimeToday += pauseDuration;
                         appState.currentPauseStart = null;
-                        
-                        // Netegar configuració de pausa
-                        appState.currentPauseType = null;
-                        appState.pauseMinTime = null;
-                        appState.pauseAlarmTime = null;
-                        
                         // Resetear todas las alarmas
                         stopAlarm();
                         appState.minPauseAlarmTriggered = false;
                         appState.isMinPauseAlarmPlaying = false;
-                        
-                        logActivity(`✅ Pausa finalitzada: ${pauseObservation}`);
                     }
                 }
             }
@@ -598,33 +411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         handleAction(actions);
     }
 
-    // --- SISTEMA DE ALARMAS PERSISTENT ---
-    
-    let wakeLock = null;
-    
-    // Intentar mantenir el dispositiu despert durant les pauses
-    async function requestWakeLock() {
-        try {
-            if ('wakeLock' in navigator) {
-                wakeLock = await navigator.wakeLock.request('screen');
-                console.log('🔋 Wake Lock activat - dispositiu mantè pantalla');
-                
-                wakeLock.addEventListener('release', () => {
-                    console.log('🔋 Wake Lock alliberat');
-                });
-            }
-        } catch (err) {
-            console.log('⚠️ Wake Lock no disponible:', err.message);
-        }
-    }
-    
-    // Alliberar Wake Lock
-    async function releaseWakeLock() {
-        if (wakeLock !== null) {
-            await wakeLock.release();
-            wakeLock = null;
-        }
-    }
+    // --- SISTEMA DE ALARMAS ---
     
     function createBeepSound(type = 'normal') {
         try {
@@ -738,11 +525,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workDuration -= currentPauseDuration; // Restar la pausa actual que aún no está en el total
                 dom.pauseTimer.textContent = formatTime(currentPauseDuration);
 
-                // Control de alarma segons tipus de pausa - SENSE restriccions de botó
-                const alarmTime = appState.pauseAlarmTime || PAUSE_ALARM_THRESHOLD;
-                
-                if (currentPauseDuration >= alarmTime) {
-                    playAlarm(); // Alarma persistent per avisar, però botó sempre actiu
+                // Control de alarma de pausa mínima (10 minutos)
+                if (currentPauseDuration >= MIN_PAUSE_ALARM_TIME) {
+                    playMinPauseAlarm();
+                }
+
+                // Control de alarma de pausa excesiva (14 minutos)
+                if (currentPauseDuration > PAUSE_ALARM_THRESHOLD) {
+                    playAlarm();
                 }
 
             } else {
@@ -780,16 +570,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
             case 'PAUSA':
-                const pauseTypeText = appState.currentPauseType ? `(${appState.currentPauseType})` : '';
-                
-                // Botó sempre disponible - sense restriccions de temps
+                const inPauseFor = appState.currentPauseStart ? new Date() - appState.currentPauseStart : 0;
+                const canEndPause = inPauseFor > MIN_PAUSE_TIME;
                 createButton(
-                    `▶️ Tornar de Pausa (P → J) ${pauseTypeText}`, 
+                    `▶️ Tornar de Pausa (P → J)`, 
                     'btn-start', 
                     endPause, 
-                    false // Mai deshabilitat
+                    !canEndPause
                 );
-                
+                if(!canEndPause){
+                   const remaining = formatTime(MIN_PAUSE_TIME - inPauseFor);
+                   dom.infoMessage.textContent = `Pausa mínima de 10 min. Falten ${remaining}`;
+                   dom.infoMessage.classList.add('alert');
+                } else if(!appState.isAlarmPlaying) {
+                   dom.infoMessage.classList.remove('alert');
+                }
                 createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
