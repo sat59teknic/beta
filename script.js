@@ -12,12 +12,90 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Probar conectividad con el backend primero
     try {
-        const healthResponse = await fetch('/api/health');
+        const healthResponse = await fetch('/api/health', {
+            method: 'GET',
+            cache: 'no-cache'
+        }
+    
+    function playAlarm() {
+        if (!appState.isAlarmPlaying) {
+            appState.isAlarmPlaying = true;
+            
+            // Activar Wake Lock per mantenir dispositiu despert
+            requestWakeLock();
+            
+            const pauseTypeText = appState.currentPauseType ? ` de ${appState.currentPauseType}` : '';
+            const alarmMinutes = Math.round((appState.pauseAlarmTime || PAUSE_ALARM_THRESHOLD) / 60000);
+            
+            dom.infoMessage.textContent = `⚠️ Temps de pausa${pauseTypeText} excedit (${alarmMinutes} min)! Torna a jornada quan puguis.`;
+            dom.infoMessage.classList.add('alert');
+            
+            // Vibrar el mòbil de forma més intensa
+            if ('vibrate' in navigator) {
+                navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
+            }
+            
+            // Intentar notificació push si està disponible
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('9T Beta10 - Pausa excedit!', {
+                    body: `Temps de pausa${pauseTypeText} excedit (${alarmMinutes} min). Torna a jornada.`,
+                    icon: '/icon-192.svg',
+                    vibrate: [1000, 300, 1000, 300, 1000]
+                });
+            }
+            
+            // Reproduir sonido cada 15 segundos (més persistent)
+            const alarmInterval = setInterval(() => {
+                if (appState.isAlarmPlaying) {
+                    createBeepSound();
+                    
+                    // Vibrar de nou
+                    if ('vibrate' in navigator) {
+                        navigator.vibrate([500, 200, 500]);
+                    }
+                } else {
+                    clearInterval(alarmInterval);
+                }
+            }, 15000); // Cada 15 segons
+            
+            createBeepSound(); // Primer sonido inmediato
+            logActivity(`🚨 Alarma activada: ${pauseTypeText} - ${alarmMinutes} min`);
+        }
+    }
+
+    function stopAlarm() {
+        appState.isAlarmPlaying = false;
+        dom.infoMessage.classList.remove('alert');
+        dom.infoMessage.textContent = "";
+        
+        // Alliberar Wake Lock quan s'aturi l'alarma
+        releaseWakeLock();
+        
+        logActivity('🔕 Alarma aturada - tornat a jornada');
+    });
+        
+        if (!healthResponse.ok) {
+            throw new Error(`Servidor no disponible (${healthResponse.status})`);
+        }
+        
         const healthData = await healthResponse.json();
         console.log('✅ Backend connectat:', healthData.message);
     } catch (error) {
         console.error('❌ Error de connectivitat backend:', error);
-        alert('Error: No es pot connectar amb el servidor. Comprova la connexió.');
+        
+        let errorMessage = 'Error de connexió desconegut';
+        
+        if (error.name === 'TypeError' || error.message.includes('fetch')) {
+            errorMessage = 'No tens connexió a internet. Comprova la teva connexió i torna a intentar-ho.';
+        } else if (error.message.includes('500')) {
+            errorMessage = 'El servidor té problemes. Prova més tard.';
+        } else if (error.message.includes('404')) {
+            errorMessage = 'Servei no trobat. Contacta amb l\'administrador.';
+        } else if (error.message.includes('Servidor no disponible')) {
+            errorMessage = 'El servidor no està disponible en aquest moment.';
+        }
+        
+        alert(`❌ Error de Connexió\n\n${errorMessage}`);
         return;
     }
     
@@ -134,9 +212,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 },
                 (error) => {
                     let errorMsg = 'Error GPS desconegut.';
-                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita\'l a configuració.';
-                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert.';
-                    if (error.code === 3) errorMsg = 'Timeout de GPS. Reintenta.';
+                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita la ubicació a la configuració del navegador.';
+                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert amb millor cobertura.';
+                    if (error.code === 3) errorMsg = 'Temps d\'espera GPS excedit. Torna a intentar-ho.';
                     dom.gpsStatus.className = 'status-indicator red';
                     reject(new Error(errorMsg));
                 },
@@ -277,8 +355,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         } catch (error) {
             dom.connectionStatus.className = 'status-indicator red';
-            logActivity(`❌ ERROR: ${error.message}`);
-            throw error;
+            
+            let userFriendlyError = 'Error de connexió desconegut';
+            
+            if (error.name === 'TypeError' || error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+                userFriendlyError = 'No tens connexió a internet. Comprova la connexió i torna a intentar-ho.';
+            } else if (error.message.includes('timeout') || error.message.includes('aborted')) {
+                userFriendlyError = 'La connexió és massa lenta. Torna a intentar-ho.';
+            } else if (error.message.includes('500')) {
+                userFriendlyError = 'Error del servidor. Prova més tard.';
+            } else if (error.message.includes('401') || error.message.includes('403')) {
+                userFriendlyError = 'Credencials incorrectes. Torna a fer login.';
+            } else if (error.message.includes('404')) {
+                userFriendlyError = 'Servei no disponible. Contacta amb suport.';
+            }
+            
+            logActivity(`❌ ERROR: ${userFriendlyError}`);
+            throw new Error(userFriendlyError);
         } finally {
             showLoading(false);
         }
@@ -645,11 +738,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workDuration -= currentPauseDuration; // Restar la pausa actual que aún no está en el total
                 dom.pauseTimer.textContent = formatTime(currentPauseDuration);
 
-                // Control de alarma segons tipus de pausa
+                // Control de alarma segons tipus de pausa - SENSE restriccions de botó
                 const alarmTime = appState.pauseAlarmTime || PAUSE_ALARM_THRESHOLD;
                 
                 if (currentPauseDuration >= alarmTime) {
-                    playAlarm();
+                    playAlarm(); // Alarma persistent per avisar, però botó sempre actiu
                 }
 
             } else {
@@ -687,29 +780,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
             case 'PAUSA':
-                const inPauseFor = appState.currentPauseStart ? new Date() - appState.currentPauseStart : 0;
-                const minTime = appState.pauseMinTime || MIN_PAUSE_TIME;
-                const alarmTime = appState.pauseAlarmTime || PAUSE_ALARM_THRESHOLD;
-                const canEndPause = inPauseFor > minTime;
-                
                 const pauseTypeText = appState.currentPauseType ? `(${appState.currentPauseType})` : '';
                 
+                // Botó sempre disponible - sense restriccions de temps
                 createButton(
                     `▶️ Tornar de Pausa (P → J) ${pauseTypeText}`, 
                     'btn-start', 
                     endPause, 
-                    !canEndPause
+                    false // Mai deshabilitat
                 );
                 
-                if(!canEndPause){
-                   const remaining = formatTime(minTime - inPauseFor);
-                   const minMinutes = Math.round(minTime / 60000);
-                   dom.infoMessage.textContent = `Pausa mínima de ${minMinutes} min. Falten ${remaining}`;
-                   dom.infoMessage.classList.add('alert');
-                } else if(!appState.isAlarmPlaying) {
-                   dom.infoMessage.classList.remove('alert');
-                   dom.infoMessage.textContent = '';
-                }
                 createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;

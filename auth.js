@@ -192,8 +192,20 @@ class AuthManager {
                         btnLoading.style.display = 'none';
                     }
                 } catch (error) {
-                    this.showAuthError('Error de conexión. Verifica tu internet.');
-                    // Restaurar botón
+                    let errorMessage = 'Error de connexió';
+                    
+                    if (error.name === 'TypeError' || error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+                        errorMessage = 'No tens connexió a internet. Comprova la connexió i torna a intentar-ho.';
+                    } else if (error.message.includes('timeout')) {
+                        errorMessage = 'La connexió és massa lenta. Torna a intentar-ho.';
+                    } else if (error.message.includes('500')) {
+                        errorMessage = 'Error del servidor. Prova més tard.';
+                    } else if (error.message.includes('401')) {
+                        errorMessage = 'Credencials incorrectes.';
+                    }
+                    
+                    this.showAuthError(errorMessage);
+                    // Restaurar botó
                     submitBtn.disabled = false;
                     btnText.style.display = 'block';
                     btnLoading.style.display = 'none';
