@@ -258,7 +258,7 @@ class AuthManager {
         }, 5000);
     }
 
-    // Mostrar modal de gestión de cuenta
+    // Mostrar modal de gestió de compte
     showAccountModal() {
         const creds = this.getCredentials();
         if (!creds) return;
@@ -268,30 +268,30 @@ class AuthManager {
         accountModal.innerHTML = `
             <div class="auth-modal-content">
                 <div class="auth-header">
-                    <h2>Mi Cuenta</h2>
+                    <h2>El Meu Compte</h2>
                 </div>
                 
                 <div class="auth-account-info">
                     <div class="auth-field">
-                        <label>Usuario actual</label>
+                        <label>Usuari actual</label>
                         <div class="auth-user-display">${creds.username}</div>
                     </div>
                     
                     <div class="auth-field">
-                        <label>Estado</label>
+                        <label>Estat</label>
                         <div class="auth-status-display">
                             <span class="auth-status-dot"></span>
-                            Sesión activa
+                            Sessió activa
                         </div>
                     </div>
                 </div>
                 
                 <div class="auth-buttons">
                     <button type="button" class="auth-btn auth-btn-secondary" onclick="authManager.closeAccountModal()">
-                        Cerrar
+                        Tancar
                     </button>
                     <button type="button" class="auth-btn auth-btn-danger" onclick="authManager.logout()">
-                        Cerrar Sesión
+                        Tancar Sessió
                     </button>
                 </div>
             </div>
@@ -299,11 +299,11 @@ class AuthManager {
 
         document.body.appendChild(accountModal);
         
-        // Guardar referencia para poder cerrarla
+        // Guardar referència per poder tancar-la
         this.currentAccountModal = accountModal;
     }
 
-    // Cerrar modal de cuenta
+    // Tancar modal de compte
     closeAccountModal() {
         if (this.currentAccountModal && document.body.contains(this.currentAccountModal)) {
             document.body.removeChild(this.currentAccountModal);
@@ -311,13 +311,13 @@ class AuthManager {
         }
     }
 
-    // Logout completo
+    // Logout complet
     logout() {
         this.clearCredentials();
         this.closeAccountModal();
         
-        // Mostrar mensaje y recargar
-        alert('Sesión cerrada. La aplicación se reiniciará.');
+        // Mostrar missatge i recarregar
+        alert('Sessió tancada. L\'aplicació es reiniciarà.');
         window.location.reload();
     }
 }

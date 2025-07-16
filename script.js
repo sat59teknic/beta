@@ -322,15 +322,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- FUNCIONES DE AUTENTICACIÓN ---
     
     function addAccountButton() {
-        // Crear botón de cuenta en el header
+        // Crear botó de compte al header
         const header = document.querySelector('.header');
         const accountBtn = document.createElement('button');
         accountBtn.className = 'account-btn';
         accountBtn.innerHTML = '👤';
-        accountBtn.title = 'Mi cuenta';
+        accountBtn.title = 'El meu compte';
         accountBtn.onclick = () => authManager.showAccountModal();
         
-        // Insertar antes del indicador GPS
+        // Inserir abans de l'indicador GPS
         const gpsStatus = document.getElementById('gps-status');
         header.insertBefore(accountBtn, gpsStatus);
     }
@@ -506,16 +506,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             const pauseLimit = PAUSE_LIMITS[pauseType];
             await scheduleNotification(pauseType, pauseLimit);
             
-            // 3. Mostrar instrucciones al usuario
-            const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
-            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantén la app abierta.`;
+            // 3. Mostrar instruccions a l'usuari
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantén l'app oberta.`;
             dom.infoMessage.classList.add('success');
             
             saveState();
             updateUI();
             
             logActivity(`🍽️ Pausa iniciada: ${pauseType} (${pauseType === 'esmorçar' ? '15min' : '30min'})`);
-            logActivity(`🔔 Alarma programada para ${timeText} - NO cierres la app`);
+            logActivity(`🔔 Alarma programada per ${timeText} - NO tanquis l'app`);
             
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
@@ -883,8 +883,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // 2. Mostrar instrucción importante si está en pausa
         if (appState.currentState === 'PAUSA' && appState.currentPauseType) {
-            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
-            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma en ${timeText}. NO cierres la app.`;
+            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma en ${timeText}. NO tanquis l'app.`;
             dom.infoMessage.classList.add('success');
             
             // Volver a activar wake lock si está en pausa
@@ -898,9 +898,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 if (remaining > 0) {
                     await scheduleNotification(appState.currentPauseType, remaining);
-                    logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restantes`);
+                    logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {
-                    // Ya pasó el tiempo, activar alarma
+                    // Ja ha passat el temps, activar alarma
                     playPauseAlarm(appState.currentPauseType);
                 }
             }
@@ -939,25 +939,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .catch(err => logActivity(`❌ Error en registrar Service Worker: ${err}`));
         }
         
-        // Detectar cuando la app pierde/gana foco
+        // Detectar quan l'app perd/guanya focus
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                logActivity('⚠️ App en background - Las alarmas pueden no funcionar');
+                logActivity('⚠️ App en background - Les alarmes poden no funcionar');
                 if (appState.currentState === 'PAUSA') {
-                    logActivity('🚨 IMPORTANTE: Mantén la app abierta para recibir alarmas');
+                    logActivity('🚨 IMPORTANT: Mantén l\'app oberta per rebre alarmes');
                 }
             } else {
-                logActivity('✅ App en foreground - Alarmas funcionan correctamente');
+                logActivity('✅ App en foreground - Alarmes funcionen correctament');
             }
         });
         
         logActivity('🚀 Beta10 Control iniciat');
-        logActivity('✅ Sistema operatiu amb alarmes mejoradas');
+        logActivity('✅ Sistema operatiu amb alarmes millorades');
         
-        // Mostrar aviso importante sobre alarmas
+        // Mostrar avís important sobre alarmes
         if (appState.currentState === 'FUERA') {
             setTimeout(() => {
-                dom.infoMessage.textContent = "📱 IMPORTANTE: Cuando inicies una pausa, mantén la app abierta para recibir alarmas.";
+                dom.infoMessage.textContent = "📱 IMPORTANT: Quan iniciis una pausa, mantén l'app oberta per rebre alarmes.";
                 dom.infoMessage.classList.add('success');
                 
                 setTimeout(() => {
