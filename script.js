@@ -508,7 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             // 3. Mostrar instruccions a l'usuari
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantén l'app oberta.`;
+            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantingues l'app oberta.`;
             dom.infoMessage.classList.add('success');
             
             saveState();
@@ -594,10 +594,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
-                    logActivity('✅ Permisos de notificació concedidos');
+                    logActivity('✅ Permisos de notificació concedits');
                     return true;
                 } else {
-                    logActivity('⚠️ Permisos de notificació denegados');
+                    logActivity('⚠️ Permisos de notificació denegats');
                     return false;
                 }
             } catch (error) {
@@ -613,10 +613,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             if ('wakeLock' in navigator) {
                 appState.wakeLock = await navigator.wakeLock.request('screen');
-                logActivity('🔆 Pantalla mantenida activa durante pausa');
+                logActivity('🔆 Pantalla mantinguda activa durant la pausa');
                 
                 appState.wakeLock.addEventListener('release', () => {
-                    logActivity('🔅 Wake lock liberado');
+                    logActivity('🔅 Wake lock alliberat');
                 });
                 
                 return true;
@@ -633,9 +633,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 await appState.wakeLock.release();
                 appState.wakeLock = null;
-                logActivity('🔅 Pantalla puede apagarse normalmente');
+                logActivity('🔅 Pantalla pot apagar-se normalment');
             } catch (error) {
-                logActivity(`⚠️ Error liberando wake lock: ${error.message}`);
+                logActivity(`⚠️ Error alliberant wake lock: ${error.message}`);
             }
         }
     }
@@ -931,7 +931,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // Escuchar mensajes del service worker
                     navigator.serviceWorker.addEventListener('message', event => {
                         if (event.data && event.data.type === 'PAUSE_ALARM') {
-                            logActivity('🔔 Alarma activada por Service Worker');
+                            logActivity('🔔 Alarma activada pel Service Worker');
                             playPauseAlarm(event.data.pauseType);
                         }
                     });
@@ -944,7 +944,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (document.hidden) {
                 logActivity('⚠️ App en background - Les alarmes poden no funcionar');
                 if (appState.currentState === 'PAUSA') {
-                    logActivity('🚨 IMPORTANT: Mantén l\'app oberta per rebre alarmes');
+                    logActivity('🚨 IMPORTANT: Mantingues l\'app oberta per rebre alarmes');
                 }
             } else {
                 logActivity('✅ App en foreground - Alarmes funcionen correctament');
@@ -957,7 +957,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Mostrar avís important sobre alarmes
         if (appState.currentState === 'FUERA') {
             setTimeout(() => {
-                dom.infoMessage.textContent = "📱 IMPORTANT: Quan iniciis una pausa, mantén l'app oberta per rebre alarmes.";
+                dom.infoMessage.textContent = "📱 IMPORTANT: Quan iniciis una pausa, mantingues l'app oberta per rebre alarmes.";
                 dom.infoMessage.classList.add('success');
                 
                 setTimeout(() => {
