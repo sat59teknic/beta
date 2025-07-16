@@ -26,21 +26,21 @@ module.exports = async function handler(req, res) {
     if (!action || !point || !location?.latitude || !location?.longitude) {
         return res.status(400).json({ 
             success: false, 
-            error: 'Dades requerides: action, point, location.latitude, location.longitude' 
+            error: 'Dades requerides: acció, punt de fitxatge i coordenades GPS' 
         });
     }
 
     if (!credentials || !credentials.username || !credentials.password) {
         return res.status(400).json({ 
             success: false, 
-            error: 'Credencials d\'usuari requerides. Inicia sessió.' 
+            error: 'Credencials d\'usuari requerides. Inicia sessió primer.' 
         });
     }
 
     if (!['entrada', 'salida'].includes(action)) {
         return res.status(400).json({ 
             success: false, 
-            error: 'Action ha de ser "entrada" o "salida"' 
+            error: 'Acció ha de ser "entrada" o "salida"' 
         });
     }
 

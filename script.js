@@ -10,14 +10,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
     console.log('🔐 Verificant autenticació...');
     
+    // Inicializar el gestor de errores
+    errorManager.init(logActivity);
+    
     // Probar conectividad con el backend primero
     try {
-        const healthResponse = await fetch('/api/health');
+        const healthResponse = await errorManager.safeFetch('/api/health', {}, 'Verificació inicial del backend');
         const healthData = await healthResponse.json();
         console.log('✅ Backend connectat:', healthData.message);
+        errorManager.showSuccess('✅ Connexió establerta amb el servidor');
     } catch (error) {
         console.error('❌ Error de connectivitat backend:', error);
-        alert('Error: No es pot connectar amb el servidor. Comprova la connexió.');
+        errorManager.handleError(error, 'Connexió inicial amb el backend');
         return;
     }
     
@@ -26,25 +30,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             await authManager.showLoginScreen();
             console.log('✅ Usuari autenticat correctament');
+            errorManager.showSuccess('✅ Sessió iniciada correctament');
         } catch (error) {
             console.error('❌ Error en autenticació:', error);
-            alert('Error d\'autenticació. Recarrega la pàgina.');
+            errorManager.handleError(error, 'Procés d\'autenticació');
             return;
         }
     } else {
         console.log('✅ Credencials trobades. Usuari ja autenticat.');
+        errorManager.showInfo('✅ Sessió restaurada automàticament');
     }
 
     // Añadir botón de cuenta al header
     addAccountButton();
 
     const PAUSE_LIMITS = {
-        desayuno: 15 * 60 * 1000,
-        comida: 30 * 60 * 1000
+        esmorçar: 15 * 60 * 1000, // 15 minutos
+        dinar: 30 * 60 * 1000     // 30 minutos
     };
-    const PAUSE_ALARM_THRESHOLD = 14 * 60 * 1000; // 14 minutos
-    const MIN_PAUSE_TIME = 10 * 60 * 1000; // 10 minutos
-    const MIN_PAUSE_ALARM_TIME = 10 * 60 * 1000; // Alarma a los 10 minutos
 
     const dom = {
         connectionStatus: document.getElementById('connection-status'),
@@ -63,11 +66,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
         workStartTime: null,
         currentPauseStart: null,
+        currentPauseType: null, // 'esmorçar' o 'dinar'
         totalPauseTimeToday: 0,
         currentLocation: null,
         isAlarmPlaying: false,
-        isMinPauseAlarmPlaying: false,
-        minPauseAlarmTriggered: false
+        pauseAlarmTriggered: false,
+        wakeLock: null // Para mantener pantalla activa
     };
 
     function saveState() {
@@ -83,6 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 ...parsedState,
                 workStartTime: parsedState.workStartTime ? new Date(parsedState.workStartTime) : null,
                 currentPauseStart: parsedState.currentPauseStart ? new Date(parsedState.currentPauseStart) : null,
+                currentPauseType: parsedState.currentPauseType || null,
             };
             logActivity("Estat recuperat de la sessió anterior.");
         }
@@ -111,7 +116,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
                 dom.gpsStatus.className = 'status-indicator red';
-                return reject(new Error('GPS no suportat pel navegador.'));
+                const error = new Error('GPS no suportat pel navegador.');
+                errorManager.handleError(error, 'Verificació de suport GPS');
+                return reject(error);
             }
             navigator.geolocation.getCurrentPosition(
                 (position) => {
@@ -123,22 +130,64 @@ document.addEventListener('DOMContentLoaded', async () => {
                     };
                     if (isNaN(appState.currentLocation.latitude)) {
                         dom.gpsStatus.className = 'status-indicator red';
-                        return reject(new Error('Coordenades GPS invàlides.'));
+                        const error = new Error('Coordenades GPS invàlides.');
+                        errorManager.handleError(error, 'Validació de coordenades GPS');
+                        return reject(error);
                     }
                     dom.gpsStatus.className = 'status-indicator green';
                     logActivity(`GPS OK: ${appState.currentLocation.latitude.toFixed(4)}, ${appState.currentLocation.longitude.toFixed(4)}`);
                     resolve(appState.currentLocation);
                 },
                 (error) => {
-                    let errorMsg = 'Error GPS desconegut.';
-                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita\'l a configuració.';
-                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert.';
-                    if (error.code === 3) errorMsg = 'Timeout de GPS. Reintenta.';
+                    // El error se maneja en translateError con error.code
                     dom.gpsStatus.className = 'status-indicator red';
-                    reject(new Error(errorMsg));
+                    errorManager.handleError(error, 'Obtenció de localització GPS');
+                    reject(error);
                 },
                 { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
             );
+        });
+    }
+
+    // Función para mostrar modal de selección de tipo de pausa
+    function showPauseTypeModal() {
+        return new Promise((resolve) => {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3>Tipus de Pausa</h3>
+                    <p>Selecciona el tipus de pausa que vols iniciar:</p>
+                    <div class="pause-type-buttons">
+                        <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('esmorçar')">
+                            🥐 Esmorçar
+                            <small>15 minuts</small>
+                        </button>
+                        <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('dinar')">
+                            🍽️ Dinar
+                            <small>30 minuts</small>
+                        </button>
+                    </div>
+                    <div class="modal-buttons">
+                        <button class="btn btn-secondary" onclick="cancelPauseType()">Cancel·lar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            window.selectPauseType = (type) => {
+                document.body.removeChild(modal);
+                resolve(type);
+                delete window.selectPauseType;
+                delete window.cancelPauseType;
+            };
+            
+            window.cancelPauseType = () => {
+                document.body.removeChild(modal);
+                resolve(null);
+                delete window.selectPauseType;
+                delete window.cancelPauseType;
+            };
         });
     }
 
@@ -223,21 +272,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function sendToProxy(action, point, observations = '') {
         if (!appState.currentLocation) {
-            throw new Error("Ubicació GPS no disponible.");
+            const error = new Error("Ubicació GPS no disponible.");
+            errorManager.handleError(error, 'Verificació de GPS per fitxatge');
+            throw error;
         }
         
         // 🔐 OBTENER CREDENCIALES DEL USUARIO ACTUAL
         const credentials = authManager.getCredentials();
         if (!credentials) {
-            throw new Error("No hay credenciales de usuario. Inicia sesión.");
+            const error = new Error("No hay credenciales de usuario. Inicia sesión.");
+            errorManager.handleError(error, 'Verificació de credencials');
+            throw error;
         }
         
         const startTime = performance.now();
-        showLoading(true, `Registrando ${action} (${point})...`);
+        showLoading(true, `Registrant ${action} (${point})...`);
         dom.connectionStatus.className = 'status-indicator yellow';
         
         try {
-            const response = await fetch(PROXY_URL, {
+            const response = await errorManager.safeFetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -248,12 +301,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // 🔐 ENVIAR CREDENCIALES DINÁMICAS
                     credentials: credentials
                 })
-            });
+            }, `Fitxatge ${action} punt ${point}`);
 
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                throw new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
+                const error = new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
+                errorManager.handleError(error, `Resposta del servidor per ${action}`);
+                throw error;
             }
             
             const duration = Math.round(performance.now() - startTime);
@@ -261,11 +316,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             const obsText = observations ? ` - Obs: ${observations.substring(0, 30)}...` : '';
             const userText = credentials.username ? ` [${credentials.username}]` : '';
             logActivity(`✅ Beta10 OK (${duration}ms): ${action} con punto '${point}' registrado${obsText}${userText}`);
+            
+            // Mostrar éxito al usuario
+            const actionText = action === 'entrada' ? 'Entrada' : 'Sortida';
+            errorManager.showSuccess(`✅ ${actionText} registrada correctament`);
+            
             return result;
 
         } catch (error) {
             dom.connectionStatus.className = 'status-indicator red';
             logActivity(`❌ ERROR: ${error.message}`);
+            // El error ya se maneja en errorManager.safeFetch
             throw error;
         } finally {
             showLoading(false);
@@ -314,7 +375,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateUI();
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            errorManager.handleError(error, 'Acció de fitxatge');
             showLoading(false);
         }
     }
@@ -353,22 +414,59 @@ document.addEventListener('DOMContentLoaded', async () => {
         ]);
     }
 
-    function startPause() {
-        handleAction([
-            { action: 'salida', point: 'J' },
-            {
-                action: 'entrada', point: 'P', newState: 'PAUSA',
-                onComplete: () => { 
-                    appState.currentPauseStart = new Date();
-                    // Resetear alarmas para nueva pausa
-                    appState.minPauseAlarmTriggered = false;
-                    appState.isMinPauseAlarmPlaying = false;
-                }
-            }
-        ]);
+    // Función modificada para iniciar pausa con selección de tipo
+    async function startPause() {
+        try {
+            const pauseType = await showPauseTypeModal();
+            if (!pauseType) return; // Usuario canceló
+            
+            await getCurrentLocation();
+            
+            // Primer fichaje: Salida de jornada
+            await sendToProxy('salida', 'J', '');
+            
+            // Segundo fichaje: Entrada a pausa con observaciones del tipo
+            await sendToProxy('entrada', 'P', pauseType);
+            
+            // Actualizar estado
+            appState.currentState = 'PAUSA';
+            appState.currentPauseStart = new Date();
+            appState.currentPauseType = pauseType;
+            appState.pauseAlarmTriggered = false;
+            
+            // 🔥 NUEVAS FUNCIONALIDADES PARA GARANTIZAR ALARMAS
+            
+            // 1. Mantener pantalla activa durante pausa
+            await requestWakeLock();
+            
+            // 2. Programar notificación del sistema
+            const pauseLimit = PAUSE_LIMITS[pauseType];
+            await scheduleNotification(pauseType, pauseLimit);
+            
+            // 3. Mostrar instrucciones al usuario
+            const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
+            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantén la app abierta.`;
+            dom.infoMessage.classList.add('success');
+            
+            saveState();
+            updateUI();
+            
+            logActivity(`🍽️ Pausa iniciada: ${pauseType} (${pauseType === 'esmorçar' ? '15min' : '30min'})`);
+            logActivity(`🔔 Alarma programada para ${timeText} - NO cierres la app`);
+            
+        } catch (error) {
+            logActivity(`❌ Error iniciant pausa: ${error.message}`);
+            errorManager.handleError(error, 'Inici de pausa');
+        }
     }
 
     function endPause() {
+        // Cancelar notificación programada
+        cancelScheduledNotification();
+        
+        // Liberar wake lock
+        releaseWakeLock();
+        
         handleAction([
             { action: 'salida', point: 'P' },
             {
@@ -378,10 +476,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                         const pauseDuration = new Date() - appState.currentPauseStart;
                         appState.totalPauseTimeToday += pauseDuration;
                         appState.currentPauseStart = null;
-                        // Resetear todas las alarmas
+                        appState.currentPauseType = null;
+                        appState.pauseAlarmTriggered = false;
                         stopAlarm();
-                        appState.minPauseAlarmTriggered = false;
-                        appState.isMinPauseAlarmPlaying = false;
+                        
+                        // Limpiar mensaje de pausa
+                        dom.infoMessage.classList.remove('success');
+                        dom.infoMessage.textContent = "";
                     }
                 }
             }
@@ -390,30 +491,130 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function endWorkday() {
         const actions = [];
+        
+        // Secuencia correcta según el estado actual
         if (appState.currentState === 'PAUSA') {
+            // Si estamos en pausa, primero salir de pausa y luego de jornada
             actions.push({ action: 'salida', point: 'P' });
-        }
-        if (appState.currentState === 'ALMACEN') {
+            actions.push({ action: 'entrada', point: 'J' });
+            actions.push({ action: 'salida', point: 'J' });
+        } else if (appState.currentState === 'ALMACEN') {
+            // Si estamos en almacén, salir directamente
             actions.push({ action: 'salida', point: '9' });
-        } else {
-             actions.push({ action: 'salida', point: 'J' });
+        } else if (appState.currentState === 'JORNADA') {
+            // Si estamos en jornada, salir directamente
+            actions.push({ action: 'salida', point: 'J' });
         }
        
-        actions[actions.length - 1].newState = 'FUERA';
-        actions[actions.length - 1].onComplete = () => {
-             // Reset para el día siguiente
-            appState.workStartTime = null;
-            appState.currentPauseStart = null;
-            appState.totalPauseTimeToday = 0;
-            stopAlarm();
-        };
+        // El último action cambia el estado a FUERA
+        if (actions.length > 0) {
+            actions[actions.length - 1].newState = 'FUERA';
+            actions[actions.length - 1].onComplete = () => {
+                // Reset para el día siguiente
+                appState.workStartTime = null;
+                appState.currentPauseStart = null;
+                appState.currentPauseType = null;
+                appState.totalPauseTimeToday = 0;
+                appState.pauseAlarmTriggered = false;
+                stopAlarm();
+            };
+        }
 
         handleAction(actions);
     }
 
-    // --- SISTEMA DE ALARMAS ---
+    // --- SISTEMA DE NOTIFICACIONES Y WAKE LOCK ---
     
-    function createBeepSound(type = 'normal') {
+    // Solicitar permisos de notificación
+    async function requestNotificationPermission() {
+        if ('Notification' in window && 'serviceWorker' in navigator) {
+            try {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    logActivity('✅ Permisos de notificació concedidos');
+                    return true;
+                } else {
+                    logActivity('⚠️ Permisos de notificació denegados');
+                    return false;
+                }
+            } catch (error) {
+                logActivity(`❌ Error permisos notificació: ${error.message}`);
+                return false;
+            }
+        }
+        return false;
+    }
+    
+    // Wake Lock para mantener pantalla activa durante pausa
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                appState.wakeLock = await navigator.wakeLock.request('screen');
+                logActivity('🔆 Pantalla mantenida activa durante pausa');
+                
+                appState.wakeLock.addEventListener('release', () => {
+                    logActivity('🔅 Wake lock liberado');
+                });
+                
+                return true;
+            }
+        } catch (error) {
+            logActivity(`⚠️ Wake lock no disponible: ${error.message}`);
+        }
+        return false;
+    }
+    
+    // Liberar wake lock
+    async function releaseWakeLock() {
+        if (appState.wakeLock) {
+            try {
+                await appState.wakeLock.release();
+                appState.wakeLock = null;
+                logActivity('🔅 Pantalla puede apagarse normalmente');
+            } catch (error) {
+                logActivity(`⚠️ Error liberando wake lock: ${error.message}`);
+            }
+        }
+    }
+    
+    // Programar notificación usando Service Worker
+    async function scheduleNotification(pauseType, delayMs) {
+        try {
+            if ('serviceWorker' in navigator) {
+                const registration = await navigator.serviceWorker.ready;
+                const timeLimit = pauseType === 'esmorçar' ? 15 : 30;
+                
+                // Enviar mensaje al service worker para programar notificación
+                registration.active.postMessage({
+                    type: 'SCHEDULE_NOTIFICATION',
+                    pauseType: pauseType,
+                    delayMs: delayMs,
+                    timeLimit: timeLimit
+                });
+                
+                logActivity(`🔔 Notificació programada: ${pauseType} en ${Math.round(delayMs/1000/60)} min`);
+            }
+        } catch (error) {
+            logActivity(`❌ Error programando notificació: ${error.message}`);
+        }
+    }
+    
+    // Cancelar notificación programada
+    async function cancelScheduledNotification() {
+        try {
+            if ('serviceWorker' in navigator) {
+                const registration = await navigator.serviceWorker.ready;
+                registration.active.postMessage({
+                    type: 'CANCEL_NOTIFICATION'
+                });
+                logActivity('🔕 Notificació cancelada');
+            }
+        } catch (error) {
+            logActivity(`❌ Error cancelando notificació: ${error.message}`);
+        }
+    }
+    
+    function createBeepSound(intensity = 'normal') {
         try {
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const oscillator = audioContext.createOscillator();
@@ -422,79 +623,78 @@ document.addEventListener('DOMContentLoaded', async () => {
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
             
-            // Diferentes sonidos según el tipo
-            if (type === 'minpause') {
-                // Sonido suave para pausa mínima completada
-                oscillator.frequency.value = 600;
-                oscillator.type = 'sine';
-                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.0);
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + 1.0);
-            } else {
-                // Sonido normal para pausas excesivas
-                oscillator.frequency.value = 800;
-                oscillator.type = 'sine';
-                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + 0.5);
-            }
+            // Sonido fuerte para alertas de pausa
+            oscillator.frequency.value = 1000;
+            oscillator.type = 'sine';
+            gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 1.5);
+            
         } catch (e) {
             console.log('No se pudo reproducir el sonido');
         }
     }
 
-    function playMinPauseAlarm() {
-        if (!appState.isMinPauseAlarmPlaying && !appState.minPauseAlarmTriggered) {
-            appState.isMinPauseAlarmPlaying = true;
-            appState.minPauseAlarmTriggered = true;
+    function playPauseAlarm(pauseType) {
+        if (!appState.pauseAlarmTriggered) {
+            appState.pauseAlarmTriggered = true;
+            appState.isAlarmPlaying = true;
             
-            // Vibrar el móvil si está disponible
+            // 🚨 ALARMA MEJORADA - MÁS PERSISTENTE
+            
+            // 1. Vibración más fuerte y más larga
             if ('vibrate' in navigator) {
-                navigator.vibrate([500, 200, 500, 200, 500]);
+                navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
             }
             
-            // Sonido suave de notificación
-            createBeepSound('minpause');
+            // 2. Sonido fuerte múltiple
+            for (let i = 0; i < 3; i++) {
+                setTimeout(() => {
+                    createBeepSound('strong');
+                }, i * 1000);
+            }
             
-            // Mostrar notificación
-            dom.infoMessage.textContent = "✅ Pausa mínima completada. Ya puedes volver.";
-            dom.infoMessage.classList.add('success');
+            // 3. Notificación del sistema inmediata
+            if (Notification.permission === 'granted') {
+                const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
+                new Notification('⏰ Temps de pausa completat!', {
+                    body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
+                    icon: '/icon-192.svg',
+                    badge: '/icon-192.svg',
+                    tag: 'pause-alarm',
+                    requireInteraction: true,
+                    silent: false
+                });
+            }
             
-            // Ocultar mensaje después de 5 segundos
-            setTimeout(() => {
-                dom.infoMessage.classList.remove('success');
-                dom.infoMessage.textContent = "";
-                appState.isMinPauseAlarmPlaying = false;
-            }, 5000);
-            
-            logActivity('✅ Pausa mínima de 10 min completada');
-        }
-    }
-
-    function playAlarm() {
-        if (!appState.isAlarmPlaying) {
-            appState.isAlarmPlaying = true;
-            dom.infoMessage.textContent = "¡Tiempo de pausa excedido! 🚨";
+            // 4. Mostrar notificación visual persistente
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            dom.infoMessage.textContent = `🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!`;
+            dom.infoMessage.classList.remove('success');
             dom.infoMessage.classList.add('alert');
             
-            // Reproducir sonido cada 10 segundos
+            logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
+            
+            // 5. Repetir alarma cada 30 segundos hasta que vuelva
             const alarmInterval = setInterval(() => {
-                if (appState.isAlarmPlaying) {
-                    createBeepSound();
+                if (appState.currentState === 'PAUSA' && appState.isAlarmPlaying) {
+                    createBeepSound('strong');
+                    if ('vibrate' in navigator) {
+                        navigator.vibrate([500, 200, 500]);
+                    }
+                    logActivity(`🔔 Recordatori: Temps de ${pauseType} completat`);
                 } else {
                     clearInterval(alarmInterval);
                 }
-            }, 10000);
-            
-            createBeepSound(); // Primer sonido inmediato
+            }, 30000); // Cada 30 segundos
         }
     }
 
     function stopAlarm() {
         appState.isAlarmPlaying = false;
         dom.infoMessage.classList.remove('alert');
+        dom.infoMessage.classList.remove('success');
         dom.infoMessage.textContent = "";
     }
 
@@ -525,14 +725,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workDuration -= currentPauseDuration; // Restar la pausa actual que aún no está en el total
                 dom.pauseTimer.textContent = formatTime(currentPauseDuration);
 
-                // Control de alarma de pausa mínima (10 minutos)
-                if (currentPauseDuration >= MIN_PAUSE_ALARM_TIME) {
-                    playMinPauseAlarm();
-                }
-
-                // Control de alarma de pausa excesiva (14 minutos)
-                if (currentPauseDuration > PAUSE_ALARM_THRESHOLD) {
-                    playAlarm();
+                // Control de alarma según el tipo de pausa
+                if (appState.currentPauseType && PAUSE_LIMITS[appState.currentPauseType]) {
+                    const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
+                    if (currentPauseDuration >= pauseLimit) {
+                        playPauseAlarm(appState.currentPauseType);
+                    }
                 }
 
             } else {
@@ -565,27 +763,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                  createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
             case 'JORNADA':
-                createButton('⏸️ Iniciar Pausa (P)', 'btn-pause', startPause);
+                createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause);
                 createButton('⛔ Finalitzar Jornada (J)', 'btn-stop', endWorkday);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
             case 'PAUSA':
-                const inPauseFor = appState.currentPauseStart ? new Date() - appState.currentPauseStart : 0;
-                const canEndPause = inPauseFor > MIN_PAUSE_TIME;
+                // Mostrar tipo de pausa actual
+                const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
+                
+                // Botón para salir de pausa - siempre habilitado
                 createButton(
-                    `▶️ Tornar de Pausa (P → J)`, 
+                    `▶️ Tornar de Pausa${pauseTypeText}`, 
                     'btn-start', 
                     endPause, 
-                    !canEndPause
+                    false // Siempre habilitado
                 );
-                if(!canEndPause){
-                   const remaining = formatTime(MIN_PAUSE_TIME - inPauseFor);
-                   dom.infoMessage.textContent = `Pausa mínima de 10 min. Falten ${remaining}`;
-                   dom.infoMessage.classList.add('alert');
-                } else if(!appState.isAlarmPlaying) {
+                
+                // Limpiar mensaje si no hay alarma
+                if(!appState.isAlarmPlaying) {
                    dom.infoMessage.classList.remove('alert');
+                   dom.infoMessage.textContent = "";
                 }
-                createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
+                
+                // Botón Finalizar Jornada DESHABILITADO en pausa para evitar confusión
+                createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
+                    errorManager.showWarning('Has de sortir de la pausa abans de finalitzar la jornada.');
+                }, true);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;
         }
@@ -596,7 +799,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         switch (appState.currentState) {
             case 'FUERA': stateText = 'Fora de Jornada'; break;
             case 'JORNADA': stateText = 'En Jornada'; break;
-            case 'PAUSA': stateText = 'En Pausa'; break;
+            case 'PAUSA': 
+                const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
+                stateText = `En Pausa${pauseTypeText}`;
+                break;
             case 'ALMACEN': stateText = 'En Magatzem'; break;
         }
         dom.currentStateText.textContent = stateText;
@@ -604,8 +810,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // --- INICIALIZACIÓN OPTIMIZADA PARA VERCEL ---
-    function init() {
+    async function init() {
         loadState();
+        
+        // 🔔 SOLICITAR PERMISOS IMPORTANTES AL INICIO
+        
+        // 1. Permisos de notificación
+        await requestNotificationPermission();
+        
+        // 2. Mostrar instrucción importante si está en pausa
+        if (appState.currentState === 'PAUSA' && appState.currentPauseType) {
+            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
+            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma en ${timeText}. NO cierres la app.`;
+            dom.infoMessage.classList.add('success');
+            
+            // Volver a activar wake lock si está en pausa
+            await requestWakeLock();
+            
+            // Volver a programar notificación si está en pausa
+            if (appState.currentPauseStart) {
+                const elapsed = new Date() - appState.currentPauseStart;
+                const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
+                const remaining = pauseLimit - elapsed;
+                
+                if (remaining > 0) {
+                    await scheduleNotification(appState.currentPauseType, remaining);
+                    logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restantes`);
+                } else {
+                    // Ya pasó el tiempo, activar alarma
+                    playPauseAlarm(appState.currentPauseType);
+                }
+            }
+        }
+        
         updateUI();
         
         // Actualizar timers cada segundo
@@ -625,12 +862,49 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Registrar el Service Worker para PWA
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js')
-                .then(reg => logActivity('✅ Service Worker registrat amb èxit.'))
+                .then(reg => {
+                    logActivity('✅ Service Worker registrat amb èxit.');
+                    
+                    // Escuchar mensajes del service worker
+                    navigator.serviceWorker.addEventListener('message', event => {
+                        if (event.data && event.data.type === 'PAUSE_ALARM') {
+                            logActivity('🔔 Alarma activada por Service Worker');
+                            playPauseAlarm(event.data.pauseType);
+                        }
+                    });
+                })
                 .catch(err => logActivity(`❌ Error en registrar Service Worker: ${err}`));
         }
         
+        // Detectar cuando la app pierde/gana foco
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                logActivity('⚠️ App en background - Las alarmas pueden no funcionar');
+                if (appState.currentState === 'PAUSA') {
+                    logActivity('🚨 IMPORTANTE: Mantén la app abierta para recibir alarmas');
+                }
+            } else {
+                logActivity('✅ App en foreground - Alarmas funcionan correctamente');
+            }
+        });
+        
         logActivity('🚀 Beta10 Control iniciat');
-        logActivity('✅ Sistema operatiu');
+        logActivity('✅ Sistema operatiu amb alarmes mejoradas');
+        
+        // Mostrar aviso importante sobre alarmas
+        if (appState.currentState === 'FUERA') {
+            setTimeout(() => {
+                dom.infoMessage.textContent = "📱 IMPORTANTE: Cuando inicies una pausa, mantén la app abierta para recibir alarmas.";
+                dom.infoMessage.classList.add('success');
+                
+                setTimeout(() => {
+                    if (appState.currentState === 'FUERA') {
+                        dom.infoMessage.classList.remove('success');
+                        dom.infoMessage.textContent = "";
+                    }
+                }, 8000);
+            }, 2000);
+        }
     }
 
     init();

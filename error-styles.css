@@ -1,0 +1,193 @@
+/* error-styles.css - Estilos para el sistema de errores */
+
+.error-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    max-width: 400px;
+    pointer-events: none;
+}
+
+.error-message {
+    background: white;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    animation: errorSlideIn 0.3s ease-out;
+    pointer-events: auto;
+    border-left: 4px solid;
+}
+
+.error-message.error-error {
+    border-left-color: #ff3b30;
+    background: linear-gradient(135deg, #ffe5e5, #fff0f0);
+}
+
+.error-message.error-network {
+    border-left-color: #ff9500;
+    background: linear-gradient(135deg, #fff3e0, #fffaf5);
+}
+
+.error-message.error-gps {
+    border-left-color: #007aff;
+    background: linear-gradient(135deg, #e3f2fd, #f8fcff);
+}
+
+.error-message.error-auth {
+    border-left-color: #5856d6;
+    background: linear-gradient(135deg, #f3e5f5, #faf8ff);
+}
+
+.error-message.error-server {
+    border-left-color: #ff2d92;
+    background: linear-gradient(135deg, #ffe8f3, #fff5f8);
+}
+
+.error-message.error-permission {
+    border-left-color: #ffcc00;
+    background: linear-gradient(135deg, #fff8e1, #fffcf5);
+}
+
+.error-message.error-validation {
+    border-left-color: #ff9500;
+    background: linear-gradient(135deg, #fff3e0, #fffaf5);
+}
+
+.error-message.error-warning {
+    border-left-color: #ff9500;
+    background: linear-gradient(135deg, #fff3e0, #fffaf5);
+}
+
+.error-message.error-success {
+    border-left-color: #34c759;
+    background: linear-gradient(135deg, #e8f5e8, #f0fff0);
+}
+
+.error-message.error-info {
+    border-left-color: #007aff;
+    background: linear-gradient(135deg, #e3f2fd, #f8fcff);
+}
+
+.error-content {
+    display: flex;
+    align-items: flex-start;
+    padding: 16px;
+    gap: 12px;
+}
+
+.error-icon {
+    font-size: 20px;
+    line-height: 1;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.error-text {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #1c1c1e;
+    white-space: pre-line;
+    font-weight: 500;
+}
+
+.error-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #8a8a8e;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.error-close:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #1c1c1e;
+}
+
+.error-close:active {
+    transform: scale(0.9);
+}
+
+@keyframes errorSlideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .error-container {
+        left: 10px;
+        right: 10px;
+        max-width: none;
+    }
+    
+    .error-content {
+        padding: 12px;
+    }
+    
+    .error-text {
+        font-size: 13px;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .error-message {
+        background: #1c1c1e;
+        color: #ffffff;
+    }
+    
+    .error-message.error-error {
+        background: linear-gradient(135deg, #2d1a1a, #1c1c1e);
+    }
+    
+    .error-message.error-network {
+        background: linear-gradient(135deg, #2d2419, #1c1c1e);
+    }
+    
+    .error-message.error-gps {
+        background: linear-gradient(135deg, #19232d, #1c1c1e);
+    }
+    
+    .error-message.error-auth {
+        background: linear-gradient(135deg, #221a2d, #1c1c1e);
+    }
+    
+    .error-message.error-server {
+        background: linear-gradient(135deg, #2d1a24, #1c1c1e);
+    }
+    
+    .error-message.error-success {
+        background: linear-gradient(135deg, #1a2d1a, #1c1c1e);
+    }
+    
+    .error-text {
+        color: #ffffff;
+    }
+    
+    .error-close {
+        color: #8e8e93;
+    }
+    
+    .error-close:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+    }
+}

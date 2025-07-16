@@ -24,7 +24,7 @@ module.exports = async function handler(req, res) {
         if (!username || !password) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Usuari i contrasenya requerits' 
+                error: 'Usuari i contrasenya requerits per validar credencials' 
             });
         }
 
