@@ -10,7 +10,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
     console.log('🔐 Verificant autenticació...');
     
-    // Definir DOM elements y funciones primero
+    // Probar conectividad con el backend primero
+    try {
+        const healthResponse = await fetch('/api/health');
+        const healthData = await healthResponse.json();
+        console.log('✅ Backend connectat:', healthData.message);
+    } catch (error) {
+        console.error('❌ Error de connectivitat backend:', error);
+        alert('Error: No es pot connectar amb el servidor. Comprova la connexió.');
+        return;
+    }
+    
+    if (!authManager.hasValidCredentials()) {
+        console.log('🔐 No hi ha credencials. Mostrant login...');
+        try {
+            await authManager.showLoginScreen();
+            console.log('✅ Usuari autenticat correctament');
+        } catch (error) {
+            console.error('❌ Error en autenticació:', error);
+            alert('Error d\'autenticació. Recarrega la pàgina.');
+            return;
+        }
+    } else {
+        console.log('✅ Credencials trobades. Usuari ja autenticat.');
+    }
+
+    // Añadir botón de cuenta al header
+    addAccountButton();
+
+    const PAUSE_LIMITS = {
+        esmorçar: 15 * 60 * 1000, // 15 minutos
+        dinar: 30 * 60 * 1000     // 30 minutos
+    };
+
     const dom = {
         connectionStatus: document.getElementById('connection-status'),
         gpsStatus: document.getElementById('gps-status'),
@@ -22,57 +54,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadingOverlay: document.getElementById('loading-overlay'),
         loadingText: document.getElementById('loading-text'),
         infoMessage: document.getElementById('info-message'),
-    };
-
-    function logActivity(message) {
-        const now = new Date().toLocaleTimeString('es-ES');
-        const p = document.createElement('p');
-        p.textContent = `[${now}] ${message}`;
-        dom.logContainer.prepend(p);
-        
-        // Limitar a 50 entradas en el log
-        while (dom.logContainer.children.length > 50) {
-            dom.logContainer.removeChild(dom.logContainer.lastChild);
-        }
-    }
-    
-    // AHORA inicializar el gestor de errores
-    errorManager.init(logActivity);
-    
-    // Probar conectividad con el backend primero
-    try {
-        const healthResponse = await errorManager.safeFetch('/api/health', {}, 'Verificació inicial del backend');
-        const healthData = await healthResponse.json();
-        console.log('✅ Backend connectat:', healthData.message);
-        errorManager.showSuccess('✅ Connexió establerta amb el servidor');
-    } catch (error) {
-        console.error('❌ Error de connectivitat backend:', error);
-        errorManager.handleError(error, 'Connexió inicial amb el backend');
-        return;
-    }
-    
-    if (!authManager.hasValidCredentials()) {
-        console.log('🔐 No hi ha credencials. Mostrant login...');
-        try {
-            await authManager.showLoginScreen();
-            console.log('✅ Usuari autenticat correctament');
-            errorManager.showSuccess('✅ Sessió iniciada correctament');
-        } catch (error) {
-            console.error('❌ Error en autenticació:', error);
-            errorManager.handleError(error, 'Procés d\'autenticació');
-            return;
-        }
-    } else {
-        console.log('✅ Credencials trobades. Usuari ja autenticat.');
-        errorManager.showInfo('✅ Sessió restaurada automàticament');
-    }
-
-    // Añadir botón de cuenta al header
-    addAccountButton();
-
-    const PAUSE_LIMITS = {
-        esmorçar: 15 * 60 * 1000, // 15 minutos
-        dinar: 30 * 60 * 1000     // 30 minutos
     };
 
     let appState = {
@@ -106,6 +87,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
+    function logActivity(message) {
+        const now = new Date().toLocaleTimeString('es-ES');
+        const p = document.createElement('p');
+        p.textContent = `[${now}] ${message}`;
+        dom.logContainer.prepend(p);
+        
+        // Limitar a 50 entradas en el log
+        while (dom.logContainer.children.length > 50) {
+            dom.logContainer.removeChild(dom.logContainer.lastChild);
+        }
+    }
+
     function showLoading(visible, text = 'Processant...') {
         dom.loadingText.textContent = text;
         dom.loadingOverlay.classList.toggle('visible', visible);
@@ -117,9 +110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
                 dom.gpsStatus.className = 'status-indicator red';
-                const error = new Error('GPS no suportat pel navegador.');
-                errorManager.handleError(error, 'Verificació de suport GPS');
-                return reject(error);
+                return reject(new Error('GPS no suportat pel navegador.'));
             }
             navigator.geolocation.getCurrentPosition(
                 (position) => {
@@ -131,19 +122,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                     };
                     if (isNaN(appState.currentLocation.latitude)) {
                         dom.gpsStatus.className = 'status-indicator red';
-                        const error = new Error('Coordenades GPS invàlides.');
-                        errorManager.handleError(error, 'Validació de coordenades GPS');
-                        return reject(error);
+                        return reject(new Error('Coordenades GPS invàlides.'));
                     }
                     dom.gpsStatus.className = 'status-indicator green';
                     logActivity(`GPS OK: ${appState.currentLocation.latitude.toFixed(4)}, ${appState.currentLocation.longitude.toFixed(4)}`);
                     resolve(appState.currentLocation);
                 },
                 (error) => {
-                    // El error se maneja en translateError con error.code
+                    let errorMsg = 'Error GPS desconegut.';
+                    if (error.code === 1) errorMsg = 'Permís GPS denegat. Habilita\'l a configuració.';
+                    if (error.code === 2) errorMsg = 'Senyal GPS no disponible. Vés a un lloc obert.';
+                    if (error.code === 3) errorMsg = 'Timeout de GPS. Reintenta.';
                     dom.gpsStatus.className = 'status-indicator red';
-                    errorManager.handleError(error, 'Obtenció de localització GPS');
-                    reject(error);
+                    reject(new Error(errorMsg));
                 },
                 { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
             );
@@ -273,25 +264,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function sendToProxy(action, point, observations = '') {
         if (!appState.currentLocation) {
-            const error = new Error("Ubicació GPS no disponible.");
-            errorManager.handleError(error, 'Verificació de GPS per fitxatge');
-            throw error;
+            throw new Error("Ubicació GPS no disponible.");
         }
         
         // 🔐 OBTENER CREDENCIALES DEL USUARIO ACTUAL
         const credentials = authManager.getCredentials();
         if (!credentials) {
-            const error = new Error("No hay credenciales de usuario. Inicia sesión.");
-            errorManager.handleError(error, 'Verificació de credencials');
-            throw error;
+            throw new Error("No hay credenciales de usuario. Inicia sesión.");
         }
         
         const startTime = performance.now();
-        showLoading(true, `Registrant ${action} (${point})...`);
+        showLoading(true, `Registrando ${action} (${point})...`);
         dom.connectionStatus.className = 'status-indicator yellow';
         
         try {
-            const response = await errorManager.safeFetch(PROXY_URL, {
+            const response = await fetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -302,14 +289,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // 🔐 ENVIAR CREDENCIALES DINÁMICAS
                     credentials: credentials
                 })
-            }, `Fitxatge ${action} punt ${point}`);
+            });
 
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                const error = new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
-                errorManager.handleError(error, `Resposta del servidor per ${action}`);
-                throw error;
+                throw new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
             }
             
             const duration = Math.round(performance.now() - startTime);
@@ -317,17 +302,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const obsText = observations ? ` - Obs: ${observations.substring(0, 30)}...` : '';
             const userText = credentials.username ? ` [${credentials.username}]` : '';
             logActivity(`✅ Beta10 OK (${duration}ms): ${action} con punto '${point}' registrado${obsText}${userText}`);
-            
-            // Mostrar éxito al usuario
-            const actionText = action === 'entrada' ? 'Entrada' : 'Sortida';
-            errorManager.showSuccess(`✅ ${actionText} registrada correctament`);
-            
             return result;
 
         } catch (error) {
             dom.connectionStatus.className = 'status-indicator red';
             logActivity(`❌ ERROR: ${error.message}`);
-            // El error ya se maneja en errorManager.safeFetch
             throw error;
         } finally {
             showLoading(false);
@@ -376,7 +355,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateUI();
             }
         } catch (error) {
-            errorManager.handleError(error, 'Acció de fitxatge');
+            alert(`Error: ${error.message}`);
             showLoading(false);
         }
     }
@@ -457,7 +436,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
-            errorManager.handleError(error, 'Inici de pausa');
+            alert(`Error: ${error.message}`);
         }
     }
 
@@ -788,7 +767,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 // Botón Finalizar Jornada DESHABILITADO en pausa para evitar confusión
                 createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
-                    errorManager.showWarning('Has de sortir de la pausa abans de finalitzar la jornada.');
+                    alert('Has de sortir de la pausa abans de finalitzar la jornada.');
                 }, true);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
                 break;

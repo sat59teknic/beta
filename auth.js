@@ -158,7 +158,7 @@ class AuthManager {
                 const remember = document.getElementById('auth-remember').checked;
 
                 if (!username || !password) {
-                    this.showAuthError('Si us plau, omple tots els camps');
+                    this.showAuthError('Por favor, completa todos los campos');
                     return;
                 }
 
@@ -185,14 +185,14 @@ class AuthManager {
                         document.body.removeChild(loginModal);
                         resolve({ username, password });
                     } else {
-                        this.showAuthError(testResult.error || 'Credencials incorrectes');
+                        this.showAuthError(testResult.error || 'Credenciales incorrectas');
                         // Restaurar botón
                         submitBtn.disabled = false;
                         btnText.style.display = 'block';
                         btnLoading.style.display = 'none';
                     }
                 } catch (error) {
-                    this.showAuthError('Error de connexió. Verifica la connexió a internet.');
+                    this.showAuthError('Error de conexión. Verifica tu internet.');
                     // Restaurar botón
                     submitBtn.disabled = false;
                     btnText.style.display = 'block';
