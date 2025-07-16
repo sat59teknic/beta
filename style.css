@@ -151,30 +151,49 @@ body {
 
 .info-message {
     text-align: center;
-    padding: 10px;
+    padding: 12px;
     border-radius: 8px;
     margin-bottom: 15px;
     font-weight: 500;
     display: none;
+    font-size: 14px;
+    line-height: 1.4;
 }
+
 .info-message.alert {
     background-color: #ffe5e5;
     color: var(--primary-red);
+    border: 2px solid var(--primary-red);
     display: block;
-    animation: pulse 2s infinite;
+    animation: pulseStrong 1s infinite;
+    box-shadow: 0 0 10px rgba(255, 59, 48, 0.3);
 }
 
 .info-message.success {
     background-color: #e5f9e5;
     color: var(--primary-green);
+    border: 2px solid var(--primary-green);
     display: block;
-    animation: fadeInOut 5s ease-in-out;
+    animation: fadeInOut 0.5s ease-in-out;
+    box-shadow: 0 0 10px rgba(52, 199, 89, 0.3);
 }
 
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.7; }
-    100% { opacity: 1; }
+@keyframes pulseStrong {
+    0% { 
+        opacity: 1; 
+        transform: scale(1);
+        box-shadow: 0 0 10px rgba(255, 59, 48, 0.3);
+    }
+    50% { 
+        opacity: 0.8; 
+        transform: scale(1.02);
+        box-shadow: 0 0 20px rgba(255, 59, 48, 0.5);
+    }
+    100% { 
+        opacity: 1; 
+        transform: scale(1);
+        box-shadow: 0 0 10px rgba(255, 59, 48, 0.3);
+    }
 }
 
 @keyframes fadeInOut {
@@ -298,7 +317,7 @@ body {
     color: var(--text-color);
 }
 
-/* Modal de observaciones */
+/* Modal de observaciones y selección de pausa */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -328,6 +347,12 @@ body {
     text-align: center;
 }
 
+.modal-content p {
+    margin: 0 0 15px 0;
+    text-align: center;
+    color: var(--subtle-text-color);
+}
+
 .modal-content textarea {
     width: 100%;
     height: 80px;
@@ -346,6 +371,35 @@ body {
     outline: none;
     border-color: var(--vercel-purple);
     box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+.pause-type-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.pause-type-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 15px;
+    font-size: 16px;
+    gap: 5px;
+    min-height: 70px;
+    justify-content: center;
+}
+
+.pause-type-btn small {
+    font-size: 12px;
+    opacity: 0.8;
+    font-weight: normal;
+}
+
+.pause-type-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
 }
 
 .modal-buttons {

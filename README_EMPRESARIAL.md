@@ -46,6 +46,28 @@
 - **10 minuts** → Pausa mínima completada (suau)
 - **14 minuts** → Pausa excessiva (forta + vibració)
 
+### 🔧 Millores V10 - Alarmes Ultra-Fiables
+- **Wake Lock API** → Manté la pantalla activa durant la pausa
+- **Notificacions del sistema** → Alarmes que funcionen encara que l'app estigui en background
+- **Service Worker millorat** → Notificacions programades independents de l'app
+- **Alarmes múltiples** → So + vibració + notificació + repetició cada 30s
+- **Recuperació d'estat** → Reprograma alarmes si recarregues la pàgina
+- **Detecció de background** → Avisa quan l'app pot perdre funcionament
+- **Permisos automàtics** → Sol·licita permisos de notificació a l'inici
+- **Instruccions clares** → Missatges visuals per mantenir l'app oberta
+
+### 🔧 Millores V9 - Sistema de Pausas Diferenciades
+- **Selecció de pausa** → Modal per triar: Esmorçar (15min) o Dinar (30min)
+- **Observacions automàtiques** → S'afegeix "esmorçar" o "dinar" segons la pausa
+- **Alarmes específiques** → Esmorçar: 15min, Dinar: 30min (soó fort únic)
+- **Indicador visual** → Mostra el tipus de pausa actual a la UI
+- **Sortida lliure** → Pots sortir de qualsevol pausa quan vulguis
+
+### 🔧 Millores V8
+- **Botó Finalitzar Jornada** → Deshabilitat durant pausa per evitar confusió
+- **Sortir de pausa** → Sense temps mínim, sortida lliure quan vulguis
+- **Flux correcte** → Pausa → Jornada → Finalitzar (seqüència obligatòria)
+
 ---
 
-✅ **Sistema operatiu i llest per a ús empresarial**
+✅ **Sistema operatiu i llest per a ús empresarial - V10 Alarmes Ultra-Fiables**
