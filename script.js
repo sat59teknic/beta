@@ -10,7 +10,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
     console.log('🔐 Verificant autenticació...');
     
-    // Inicializar el gestor de errores
+    // Definir DOM elements y funciones primero
+    const dom = {
+        connectionStatus: document.getElementById('connection-status'),
+        gpsStatus: document.getElementById('gps-status'),
+        currentStateText: document.getElementById('current-state-text'),
+        workTimer: document.getElementById('work-timer'),
+        pauseTimer: document.getElementById('pause-timer'),
+        buttonContainer: document.getElementById('button-container'),
+        logContainer: document.getElementById('log-container'),
+        loadingOverlay: document.getElementById('loading-overlay'),
+        loadingText: document.getElementById('loading-text'),
+        infoMessage: document.getElementById('info-message'),
+    };
+
+    function logActivity(message) {
+        const now = new Date().toLocaleTimeString('es-ES');
+        const p = document.createElement('p');
+        p.textContent = `[${now}] ${message}`;
+        dom.logContainer.prepend(p);
+        
+        // Limitar a 50 entradas en el log
+        while (dom.logContainer.children.length > 50) {
+            dom.logContainer.removeChild(dom.logContainer.lastChild);
+        }
+    }
+    
+    // AHORA inicializar el gestor de errores
     errorManager.init(logActivity);
     
     // Probar conectividad con el backend primero
@@ -49,19 +75,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         dinar: 30 * 60 * 1000     // 30 minutos
     };
 
-    const dom = {
-        connectionStatus: document.getElementById('connection-status'),
-        gpsStatus: document.getElementById('gps-status'),
-        currentStateText: document.getElementById('current-state-text'),
-        workTimer: document.getElementById('work-timer'),
-        pauseTimer: document.getElementById('pause-timer'),
-        buttonContainer: document.getElementById('button-container'),
-        logContainer: document.getElementById('log-container'),
-        loadingOverlay: document.getElementById('loading-overlay'),
-        loadingText: document.getElementById('loading-text'),
-        infoMessage: document.getElementById('info-message'),
-    };
-
     let appState = {
         currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
         workStartTime: null,
@@ -93,18 +106,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    function logActivity(message) {
-        const now = new Date().toLocaleTimeString('es-ES');
-        const p = document.createElement('p');
-        p.textContent = `[${now}] ${message}`;
-        dom.logContainer.prepend(p);
-        
-        // Limitar a 50 entradas en el log
-        while (dom.logContainer.children.length > 50) {
-            dom.logContainer.removeChild(dom.logContainer.lastChild);
-        }
-    }
-
     function showLoading(visible, text = 'Processant...') {
         dom.loadingText.textContent = text;
         dom.loadingOverlay.classList.toggle('visible', visible);
