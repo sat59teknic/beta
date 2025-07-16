@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('✅ Backend connectat:', healthData.message);
     } catch (error) {
         console.error('❌ Error de connectivitat backend:', error);
-        alert('No es pot connectar amb el servidor. Comprova la connexió.');
+        showTranslatedError(error);
         return;
     }
     
@@ -99,6 +99,78 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // Función para traducir errores automáticamente
+    function translateError(error) {
+        const errorMessage = error.message || error.toString();
+        const lowerError = errorMessage.toLowerCase();
+        
+        // Errores GPS con códigos
+        if (error.code === 1) {
+            return 'Has denegat el permís de localització. Habilita\'l per continuar.';
+        }
+        if (error.code === 2) {
+            return 'No es pot obtenir la ubicació. Vés a un lloc obert.';
+        }
+        if (error.code === 3) {
+            return 'El GPS triga massa temps. Reintenta en uns segons.';
+        }
+        
+        // Errores de red
+        if (lowerError.includes('failed to fetch') || 
+            lowerError.includes('network error') || 
+            lowerError.includes('fetch')) {
+            return 'No tens connexió a internet. Comprova la xarxa i torna-ho a intentar.';
+        }
+        
+        if (lowerError.includes('timeout') || 
+            lowerError.includes('timed out')) {
+            return 'La connexió ha trigat massa temps. Comprova la xarxa.';
+        }
+        
+        if (lowerError.includes('cors') || 
+            lowerError.includes('cross-origin')) {
+            return 'Error de configuració del servidor. Contacta amb administració.';
+        }
+        
+        // Errores GPS por mensaje
+        if (lowerError.includes('gps no suportat') || 
+            lowerError.includes('geolocation not supported')) {
+            return 'El teu dispositiu no suporta GPS. Canvia de navegador.';
+        }
+        
+        if (lowerError.includes('coordenades gps invàlides')) {
+            return 'Les coordenades obtingudes no són vàlides. Reintenta.';
+        }
+        
+        // Errores de autenticación
+        if (lowerError.includes('credencials incorrectes') || 
+            lowerError.includes('login falló') || 
+            lowerError.includes('unauthorized')) {
+            return 'Usuari o contrasenya incorrectes. Revisa les credencials.';
+        }
+        
+        // Errores del servidor
+        if (lowerError.includes('http 500') || 
+            lowerError.includes('internal server error')) {
+            return 'El servidor Beta10 té problemes. Prova més tard.';
+        }
+        
+        if (lowerError.includes('http 404') || 
+            lowerError.includes('not found')) {
+            return 'La pàgina Beta10 no existeix. Comprova la configuració.';
+        }
+        
+        // Si no es puede traducir, devolver el original
+        return errorMessage;
+    }
+    
+    // Función para mostrar errores traducidos
+    function showTranslatedError(error) {
+        const translatedMessage = translateError(error);
+        alert(translatedMessage);
+        logActivity(`❌ ERROR: ${translatedMessage}`);
+    }
+    
     function showLoading(visible, text = 'Processant...') {
         dom.loadingText.textContent = text;
         dom.loadingOverlay.classList.toggle('visible', visible);
@@ -110,9 +182,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
                 dom.gpsStatus.className = 'status-indicator red';
-                const errorMsg = 'El teu dispositiu no suporta GPS. Canvia de navegador.';
-                alert(errorMsg);
-                return reject(new Error(errorMsg));
+                const error = new Error('GPS no suportat pel navegador.');
+                showTranslatedError(error);
+                return reject(error);
             }
             navigator.geolocation.getCurrentPosition(
                 (position) => {
@@ -124,9 +196,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     };
                     if (isNaN(appState.currentLocation.latitude)) {
                         dom.gpsStatus.className = 'status-indicator red';
-                        const errorMsg = 'Les coordenades obtingudes no són vàlides. Reintenta.';
-                        alert(errorMsg);
-                        return reject(new Error(errorMsg));
+                        const error = new Error('Coordenades GPS invàlides.');
+                        showTranslatedError(error);
+                        return reject(error);
                     }
                     dom.gpsStatus.className = 'status-indicator green';
                     logActivity(`GPS OK: ${appState.currentLocation.latitude.toFixed(4)}, ${appState.currentLocation.longitude.toFixed(4)}`);
@@ -134,16 +206,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 },
                 (error) => {
                     dom.gpsStatus.className = 'status-indicator red';
-                    let errorMsg = 'Error GPS desconegut.';
-                    if (error.code === 1) {
-                        errorMsg = 'Has denegat el permís de localització. Habilita\'l per continuar.';
-                    } else if (error.code === 2) {
-                        errorMsg = 'No es pot obtenir la ubicació. Vés a un lloc obert.';
-                    } else if (error.code === 3) {
-                        errorMsg = 'El GPS triga massa temps. Reintenta en uns segons.';
-                    }
-                    alert(errorMsg);
-                    reject(new Error(errorMsg));
+                    showTranslatedError(error);
+                    reject(error);
                 },
                 { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
             );
@@ -273,17 +337,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function sendToProxy(action, point, observations = '') {
         if (!appState.currentLocation) {
-            const errorMsg = 'Ubicació GPS no disponible.';
-            alert(errorMsg);
-            throw new Error(errorMsg);
+            const error = new Error('Ubicació GPS no disponible.');
+            showTranslatedError(error);
+            throw error;
         }
         
         // 🔐 OBTENER CREDENCIALES DEL USUARIO ACTUAL
         const credentials = authManager.getCredentials();
         if (!credentials) {
-            const errorMsg = 'Has de fer login primer.';
-            alert(errorMsg);
-            throw new Error(errorMsg);
+            const error = new Error('Has de fer login primer.');
+            showTranslatedError(error);
+            throw error;
         }
         
         const startTime = performance.now();
@@ -307,17 +371,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                let errorMsg = result.error || `Error en el servidor (HTTP ${response.status})`;
-                // Traducir errores comunes
-                if (errorMsg.includes('Failed to fetch')) {
-                    errorMsg = 'No tens connexió a internet. Comprova la xarxa i torna-ho a intentar.';
-                } else if (errorMsg.includes('credencials incorrectes')) {
-                    errorMsg = 'Usuari o contrasenya incorrectes. Revisa les credencials.';
-                } else if (errorMsg.includes('Login falló')) {
-                    errorMsg = 'Error d\'autenticació. Comprova les credencials.';
-                }
-                alert(errorMsg);
-                throw new Error(errorMsg);
+                const error = new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
+                showTranslatedError(error);
+                throw error;
             }
             
             const duration = Math.round(performance.now() - startTime);
@@ -330,10 +386,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         } catch (error) {
             dom.connectionStatus.className = 'status-indicator red';
-            logActivity(`❌ ERROR: ${error.message}`);
-            // Si no se ha mostrado error antes, mostrarlo ahora
-            if (!error.message.includes('connexió') && !error.message.includes('credencials') && !error.message.includes('login')) {
-                alert(error.message);
+            // Si es un error de fetch, traducirlo
+            if (error.message && error.message.includes('fetch')) {
+                showTranslatedError(error);
             }
             throw error;
         } finally {
@@ -383,7 +438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 updateUI();
             }
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            showTranslatedError(error);
             showLoading(false);
         }
     }
@@ -464,7 +519,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
-            alert(`Error: ${error.message}`);
+            showTranslatedError(error);
         }
     }
 
