@@ -407,6 +407,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isEndingWorkday = actions.some(a => a.newState === 'FUERA');
             if (isEndingWorkday) {
                 const extraInfo = calculateExtraHours();
+                
+                // 🔍 DEBUG: Mostrar información de tiempo en el log
+                const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
+                logActivity(`⏰ Jornada total: ${totalHoursFormatted} (estàndard: 9h)`);
+                
                 if (extraInfo.extraHours >= 0.5) { // 30 minutos o más
                     const extraBlocks = extraInfo.extraBlocks;
                     let extraText = '';
@@ -423,10 +428,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                             extraText = `+${hours}h${mins}min`;
                         }
                     }
+                    logActivity(`💰 Detectades ${extraText} d'hores extra`);
                     const shouldAddObs = confirm(`Detectades ${extraText} d'hores extra. Vols afegir observacions?`);
                     if (shouldAddObs) {
                         observations = await showObservationsModal(extraText);
                     }
+                } else if (extraInfo.totalHours > 9) {
+                    // 🆕 NUEVA FUNCIONALIDAD: Informar sobre tiempo extra < 30min
+                    const extraMinutes = Math.round((extraInfo.totalHours - 9) * 60);
+                    logActivity(`ℹ️ Jornada amb ${extraMinutes} minuts extra (menys de 30min, no es considera hora extra)`);
+                } else {
+                    logActivity(`✅ Jornada completada dins del temps estàndard`);
                 }
             }
             
@@ -450,6 +462,45 @@ document.addEventListener('DOMContentLoaded', async () => {
             logActivity(`📝 Observacions afegides: ${observations}`);
             // Aquí podrías enviar las observaciones a un endpoint específico si fuera necesario
         }
+    }
+    
+    // 🆕 NUEVA FUNCIÓN: Mostrar resumen de tiempo actual
+    function showTimeReport() {
+        const extraInfo = calculateExtraHours();
+        const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
+        
+        let reportMessage = `📊 RESUM DE TEMPS ACTUAL:\n\n`;
+        reportMessage += `⏰ Jornada total: ${totalHoursFormatted}\n`;
+        reportMessage += `🎯 Estàndard: 9h 00min\n\n`;
+        
+        if (extraInfo.extraHours >= 0.5) {
+            const extraBlocks = extraInfo.extraBlocks;
+            let extraText = '';
+            if (extraBlocks === 1) {
+                extraText = '+30min';
+            } else if (extraBlocks === 2) {
+                extraText = '+1h';
+            } else {
+                const hours = Math.floor(extraBlocks / 2);
+                const mins = (extraBlocks % 2) * 30;
+                if (mins === 0) {
+                    extraText = `+${hours}h`;
+                } else {
+                    extraText = `+${hours}h${mins}min`;
+                }
+            }
+            reportMessage += `💰 Hores extra: ${extraText}\n`;
+            reportMessage += `✅ Es considera hora extra (≥30min)`;
+        } else if (extraInfo.totalHours > 9) {
+            const extraMinutes = Math.round((extraInfo.totalHours - 9) * 60);
+            reportMessage += `ℹ️ Temps extra: ${extraMinutes} minuts\n`;
+            reportMessage += `⚠️ No es considera hora extra (<30min)`;
+        } else {
+            reportMessage += `✅ Dins del temps estàndard`;
+        }
+        
+        alert(reportMessage);
+        logActivity(`📊 Resum mostrat: ${totalHoursFormatted} total`);
     }
 
     function startWorkday() {
@@ -824,11 +875,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                  createButton('▶️ Sortir Magatzem i Iniciar Jornada (9 → J)', 'btn-start', endAlmacenAndStartWorkday);
                  createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
                  createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
+                 // 🆕 NUEVO: Botón para ver resumen de tiempo
+                 createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
                 break;
             case 'JORNADA':
                 createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause);
                 createButton('⛔ Finalitzar Jornada (J)', 'btn-stop', endWorkday);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
+                // 🆕 NUEVO: Botón para ver resumen de tiempo
+                createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
                 break;
             case 'PAUSA':
                 // Mostrar tipo de pausa actual
@@ -853,6 +908,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     alert('Has de sortir de la pausa abans de finalitzar la jornada.');
                 }, true);
                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
+                // 🆕 NUEVO: Botón para ver resumen de tiempo
+                createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
                 break;
         }
     }
