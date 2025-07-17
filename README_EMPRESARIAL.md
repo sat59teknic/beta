@@ -57,9 +57,9 @@
 - **Instruccions clares** → Missatges visuals per mantenir l'app oberta
 
 ### 🔧 Millores V9 - Sistema de Pausas Diferenciades
-- **Selecció de pausa** → Modal per triar: Esmorçar (15min) o Dinar (30min)
+- **Selecció de pausa** → Modal per triar: Esmorçar (10min) o Dinar (30min)
 - **Observacions automàtiques** → S'afegeix "esmorçar" o "dinar" segons la pausa
-- **Alarmes específiques** → Esmorçar: 15min, Dinar: 30min (soó fort únic)
+- **Alarmes específiques** → Esmorçar: 10min, Dinar: 30min (soó fort únic)
 - **Indicador visual** → Mostra el tipus de pausa actual a la UI
 - **Sortida lliure** → Pots sortir de qualsevol pausa quan vulguis
 

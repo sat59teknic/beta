@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     addAccountButton();
 
     const PAUSE_LIMITS = {
-        esmorçar: 15 * 60 * 1000, // 15 minutos
+        esmorçar: 10 * 60 * 1000, // 10 minutos
         dinar: 30 * 60 * 1000     // 30 minutos
     };
 
@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <div class="pause-type-buttons">
                         <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('esmorçar')">
                             🥐 Esmorçar
-                            <small>15 minuts</small>
+                            <small>10 minuts</small>
                         </button>
                         <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('dinar')">
                             🍽️ Dinar
@@ -507,14 +507,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             await scheduleNotification(pauseType, pauseLimit);
             
             // 3. Mostrar instruccions a l'usuari
-            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            const timeText = pauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
             dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantingues l'app oberta.`;
             dom.infoMessage.classList.add('success');
             
             saveState();
             updateUI();
             
-            logActivity(`🍽️ Pausa iniciada: ${pauseType} (${pauseType === 'esmorçar' ? '15min' : '30min'})`);
+            logActivity(`🍽️ Pausa iniciada: ${pauseType} (${pauseType === 'esmorçar' ? '10min' : '30min'})`);
             logActivity(`🔔 Alarma programada per ${timeText} - NO tanquis l'app`);
             
         } catch (error) {
@@ -645,7 +645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             if ('serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
-                const timeLimit = pauseType === 'esmorçar' ? 15 : 30;
+                const timeLimit = pauseType === 'esmorçar' ? 10 : 30;
                 
                 // Enviar mensaje al service worker para programar notificación
                 registration.active.postMessage({
@@ -720,7 +720,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             // 3. Notificación del sistema inmediata
             if (Notification.permission === 'granted') {
-                const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
+                const timeText = pauseType === 'esmorçar' ? '10 minutos' : '30 minutos';
                 new Notification('⏰ Temps de pausa completat!', {
                     body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
                     icon: '/icon-192.svg',
@@ -732,7 +732,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             
             // 4. Mostrar notificación visual persistente
-            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            const timeText = pauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
             dom.infoMessage.textContent = `🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!`;
             dom.infoMessage.classList.remove('success');
             dom.infoMessage.classList.add('alert');
@@ -883,7 +883,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // 2. Mostrar instrucción importante si está en pausa
         if (appState.currentState === 'PAUSA' && appState.currentPauseType) {
-            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            const timeText = appState.currentPauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
             dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma en ${timeText}. NO tanquis l'app.`;
             dom.infoMessage.classList.add('success');
             
