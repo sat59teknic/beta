@@ -65,7 +65,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentLocation: null,
         isAlarmPlaying: false,
         pauseAlarmTriggered: false,
-        wakeLock: null // Para mantener pantalla activa
+        wakeLock: null, // Para mantener pantalla activa
+        // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
+        workDayStandard: null, // 8 o 9 según el día
+        workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
+        workStartDay: null     // Día de inicio de jornada
     };
 
     function saveState() {
@@ -82,8 +86,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workStartTime: parsedState.workStartTime ? new Date(parsedState.workStartTime) : null,
                 currentPauseStart: parsedState.currentPauseStart ? new Date(parsedState.currentPauseStart) : null,
                 currentPauseType: parsedState.currentPauseType || null,
+                // 🆕 MANTENER HORARIO DINÁMICO
+                workDayStandard: parsedState.workDayStandard || null,
+                workDayType: parsedState.workDayType || null,
+                workStartDay: parsedState.workStartDay || null
             };
-            logActivity("Estat recuperat de la sessió anterior.");
+            if (appState.workDayType) {
+                logActivity(`Estat recuperat: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)})`);
+            } else {
+                logActivity("Estat recuperat de la sessió anterior.");
+            }
         }
     }
     
@@ -288,9 +300,42 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Detectar si son horas extra
+    // 🆕 FUNCIONES PARA HORARIOS DINÁMICOS
+    function getStandardWorkDay(date = new Date()) {
+        const dayOfWeek = date.getDay(); // 0=Domingo, 1=Lunes, 5=Viernes, 6=Sábado
+        
+        if (dayOfWeek === 5) { // Viernes
+            return 8;
+        } else if (dayOfWeek >= 1 && dayOfWeek <= 4) { // Lunes-Jueves
+            return 9;
+        } else if (dayOfWeek === 6) { // Sábado
+            return 0; // Todo son horas extra
+        }
+        // Domingo
+        return 9; // Por defecto
+    }
+    
+    function getDayTypeName(date = new Date()) {
+        const dayOfWeek = date.getDay();
+        
+        if (dayOfWeek === 5) {
+            return "Divendres";
+        } else if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+            return "Dilluns-Dijous";
+        } else if (dayOfWeek === 6) {
+            return "Dissabte";
+        }
+        return "Diumenge";
+    }
+    
+    function getStandardWorkDayFormatted(standard) {
+        if (standard === 0) return "0h (tot extra)";
+        return `${standard}h`;
+    }
+    
+    // Detectar si son horas extra con horario dinámico
     function calculateExtraHours() {
-        if (!appState.workStartTime) return { extraHours: 0, totalHours: 0, extraBlocks: 0 };
+        if (!appState.workStartTime) return { extraHours: 0, totalHours: 0, extraBlocks: 0, standardWorkDay: 9 };
         
         const now = new Date();
         const workDuration = now - appState.workStartTime - appState.totalPauseTimeToday;
@@ -305,17 +350,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         const totalPauseTime = (appState.totalPauseTimeToday + currentPauseDuration) / (1000 * 60 * 60);
         const totalJourneyTime = totalWorkTime + totalPauseTime; // Jornada completa
         
-        const standardWorkDay = 9; // 9 horas estándar (trabajo + pausa)
+        // 🆕 USAR HORARIO DINÁMICO
+        const standardWorkDay = appState.workDayStandard || 9;
         const extraTime = Math.max(0, totalJourneyTime - standardWorkDay);
         
-        // Solo contar como extra si es >= 30 minutos
-        const extraHours = extraTime >= 0.5 ? extraTime : 0;
+        // Solo contar como extra si es >= 30 minutos (excepto sábados)
+        let extraHours = 0;
+        if (standardWorkDay === 0) {
+            // Sábado: todo son horas extra
+            extraHours = totalJourneyTime;
+        } else {
+            extraHours = extraTime >= 0.5 ? extraTime : 0;
+        }
+        
         const extraBlocks = Math.floor(extraHours / 0.5); // Bloques de 30min
         
         return { 
             extraHours: extraHours, 
             totalHours: totalJourneyTime,
-            extraBlocks: extraBlocks
+            extraBlocks: extraBlocks,
+            standardWorkDay: standardWorkDay
         };
     }
 
@@ -407,12 +461,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isEndingWorkday = actions.some(a => a.newState === 'FUERA');
             if (isEndingWorkday) {
                 const extraInfo = calculateExtraHours();
+                const standardWorkDay = extraInfo.standardWorkDay;
+                const dayType = appState.workDayType || 'Desconegut';
                 
                 // 🔍 DEBUG: Mostrar información de tiempo en el log
                 const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
-                logActivity(`⏰ Jornada total: ${totalHoursFormatted} (estàndard: 9h)`);
+                const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
+                logActivity(`⏰ Jornada total: ${totalHoursFormatted} (estàndard ${dayType}: ${standardFormatted})`);
                 
-                if (extraInfo.extraHours >= 0.5) { // 30 minutos o más
+                // 🆕 LÓGICA ESPECIAL PARA SÁBADOS
+                if (standardWorkDay === 0) {
+                    // Sábado: siempre pedir observaciones
+                    const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+                    let extraText = '';
+                    if (totalBlocks === 1) {
+                        extraText = '+30min';
+                    } else if (totalBlocks === 2) {
+                        extraText = '+1h';
+                    } else {
+                        const hours = Math.floor(totalBlocks / 2);
+                        const mins = (totalBlocks % 2) * 30;
+                        if (mins === 0) {
+                            extraText = `+${hours}h`;
+                        } else {
+                            extraText = `+${hours}h${mins}min`;
+                        }
+                    }
+                    logActivity(`💰 Dissabte: ${extraText} d'hores extra (tot és extra)`);
+                    alert(`💰 Dissabte: ${extraText} d'hores extra detectades.\n\nHas d'afegir observacions obligatòriament.`);
+                    observations = await showObservationsModal(extraText);
+                } else if (extraInfo.extraHours >= 0.5) {
+                    // Lunes-Jueves o Viernes con horas extra
                     const extraBlocks = extraInfo.extraBlocks;
                     let extraText = '';
                     if (extraBlocks === 1) {
@@ -428,14 +507,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                             extraText = `+${hours}h${mins}min`;
                         }
                     }
-                    logActivity(`💰 Detectades ${extraText} d'hores extra`);
+                    logActivity(`💰 Detectades ${extraText} d'hores extra (estàndard ${dayType}: ${standardFormatted})`);
                     const shouldAddObs = confirm(`Detectades ${extraText} d'hores extra. Vols afegir observacions?`);
                     if (shouldAddObs) {
                         observations = await showObservationsModal(extraText);
                     }
-                } else if (extraInfo.totalHours > 9) {
-                    // 🆕 NUEVA FUNCIONALIDAD: Informar sobre tiempo extra < 30min
-                    const extraMinutes = Math.round((extraInfo.totalHours - 9) * 60);
+                } else if (extraInfo.totalHours > standardWorkDay) {
+                    // Tiempo extra pero menos de 30 minutos
+                    const extraMinutes = Math.round((extraInfo.totalHours - standardWorkDay) * 60);
                     logActivity(`ℹ️ Jornada amb ${extraMinutes} minuts extra (menys de 30min, no es considera hora extra)`);
                 } else {
                     logActivity(`✅ Jornada completada dins del temps estàndard`);
@@ -464,16 +543,39 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    // 🆕 NUEVA FUNCIÓN: Mostrar resumen de tiempo actual
+    // 🆕 NUEVA FUNCIÓN: Mostrar resumen de tiempo actual con horario dinámico
     function showTimeReport() {
         const extraInfo = calculateExtraHours();
         const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
+        const standardWorkDay = extraInfo.standardWorkDay;
+        const dayType = appState.workDayType || 'Desconegut';
+        const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
         
         let reportMessage = `📊 RESUM DE TEMPS ACTUAL:\n\n`;
         reportMessage += `⏰ Jornada total: ${totalHoursFormatted}\n`;
-        reportMessage += `🎯 Estàndard: 9h 00min\n\n`;
+        reportMessage += `📅 Dia: ${dayType}\n`;
+        reportMessage += `🎯 Estàndard: ${standardFormatted}\n\n`;
         
-        if (extraInfo.extraHours >= 0.5) {
+        if (standardWorkDay === 0) {
+            // Sábado: todo es extra
+            const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+            let extraText = '';
+            if (totalBlocks === 1) {
+                extraText = '+30min';
+            } else if (totalBlocks === 2) {
+                extraText = '+1h';
+            } else {
+                const hours = Math.floor(totalBlocks / 2);
+                const mins = (totalBlocks % 2) * 30;
+                if (mins === 0) {
+                    extraText = `+${hours}h`;
+                } else {
+                    extraText = `+${hours}h${mins}min`;
+                }
+            }
+            reportMessage += `💰 Hores extra: ${extraText}\n`;
+            reportMessage += `✅ Dissabte: tot és hora extra`;
+        } else if (extraInfo.extraHours >= 0.5) {
             const extraBlocks = extraInfo.extraBlocks;
             let extraText = '';
             if (extraBlocks === 1) {
@@ -491,8 +593,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             reportMessage += `💰 Hores extra: ${extraText}\n`;
             reportMessage += `✅ Es considera hora extra (≥30min)`;
-        } else if (extraInfo.totalHours > 9) {
-            const extraMinutes = Math.round((extraInfo.totalHours - 9) * 60);
+        } else if (extraInfo.totalHours > standardWorkDay) {
+            const extraMinutes = Math.round((extraInfo.totalHours - standardWorkDay) * 60);
             reportMessage += `ℹ️ Temps extra: ${extraMinutes} minuts\n`;
             reportMessage += `⚠️ No es considera hora extra (<30min)`;
         } else {
@@ -500,14 +602,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         alert(reportMessage);
-        logActivity(`📊 Resum mostrat: ${totalHoursFormatted} total`);
+        logActivity(`📊 Resum mostrat: ${totalHoursFormatted} total (${dayType})`);
     }
 
     function startWorkday() {
         handleAction([
             {
                 action: 'entrada', point: 'J', newState: 'JORNADA',
-                onComplete: () => { appState.workStartTime = new Date(); }
+                onComplete: () => { 
+                    const now = new Date();
+                    appState.workStartTime = now;
+                    // 🆕 ESTABLECER HORARIO DINÁMICO
+                    appState.workStartDay = now.getDay();
+                    appState.workDayStandard = getStandardWorkDay(now);
+                    appState.workDayType = getDayTypeName(now);
+                    logActivity(`📅 Jornada iniciada: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)`);
+                }
             }
         ]);
     }
@@ -516,7 +626,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         handleAction([
             {
                 action: 'entrada', point: '9', newState: 'ALMACEN',
-                onComplete: () => { appState.workStartTime = new Date(); }
+                onComplete: () => { 
+                    const now = new Date();
+                    appState.workStartTime = now;
+                    // 🆕 ESTABLECER HORARIO DINÁMICO
+                    appState.workStartDay = now.getDay();
+                    appState.workDayStandard = getStandardWorkDay(now);
+                    appState.workDayType = getDayTypeName(now);
+                    logActivity(`📅 Magatzem iniciat: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)`);
+                }
             }
         ]);
     }
@@ -630,6 +748,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 appState.currentPauseType = null;
                 appState.totalPauseTimeToday = 0;
                 appState.pauseAlarmTriggered = false;
+                // 🆕 LIMPIAR HORARIO DINÁMICO
+                appState.workDayStandard = null;
+                appState.workDayType = null;
+                appState.workStartDay = null;
                 stopAlarm();
             };
         }
@@ -916,15 +1038,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     function updateUI() {
         let stateText = '--';
+        
+        // 🆕 INCLUIR TIPO DE DÍA EN EL ESTADO
+        const dayInfo = appState.workDayType ? ` - ${appState.workDayType}` : '';
+        const standardInfo = appState.workDayStandard !== null ? ` (${getStandardWorkDayFormatted(appState.workDayStandard)})` : '';
+        
         switch (appState.currentState) {
-            case 'FUERA': stateText = 'Fora de Jornada'; break;
-            case 'JORNADA': stateText = 'En Jornada'; break;
+            case 'FUERA': 
+                stateText = 'Fora de Jornada'; 
+                break;
+            case 'JORNADA': 
+                stateText = `En Jornada${dayInfo}${standardInfo}`; 
+                break;
             case 'PAUSA': 
                 const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
-                stateText = `En Pausa${pauseTypeText}`;
+                stateText = `En Pausa${pauseTypeText}${dayInfo}`;
                 break;
-            case 'ALMACEN': stateText = 'En Magatzem'; break;
+            case 'ALMACEN': 
+                stateText = `En Magatzem${dayInfo}${standardInfo}`; 
+                break;
         }
+        
         dom.currentStateText.textContent = stateText;
         generateDynamicButtons();
     }
@@ -961,6 +1095,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     playPauseAlarm(appState.currentPauseType);
                 }
             }
+        }
+        
+        // 🆕 NUEVO: Mostrar información del día al iniciar
+        if (appState.currentState !== 'FUERA' && appState.workDayType) {
+            const dayInfo = `${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)})`;
+            logActivity(`📅 Horari d'avui: ${dayInfo}`);
         }
         
         updateUI();
@@ -1014,7 +1154,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Mostrar avís important sobre alarmes
         if (appState.currentState === 'FUERA') {
             setTimeout(() => {
-                dom.infoMessage.textContent = "📱 IMPORTANT: Quan iniciis una pausa, mantingues l'app oberta per rebre alarmes.";
+                // 🆕 NUEVO: Mostrar información del día actual
+                const today = new Date();
+                const todayStandard = getStandardWorkDay(today);
+                const todayType = getDayTypeName(today);
+                
+                if (todayStandard === 0) {
+                    // Sábado
+                    dom.infoMessage.textContent = `💰 Avui és ${todayType}: Tot el temps serà hora extra. Cal afegir observacions.`;
+                } else {
+                    dom.infoMessage.textContent = `📅 Avui és ${todayType} (${getStandardWorkDayFormatted(todayStandard)} estàndard). Mantingues l'app oberta durant les pauses.`;
+                }
                 dom.infoMessage.classList.add('success');
                 
                 setTimeout(() => {
@@ -1022,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         dom.infoMessage.classList.remove('success');
                         dom.infoMessage.textContent = "";
                     }
-                }, 8000);
+                }, 10000); // 10 segundos para leer la información
             }, 2000);
         }
     }
