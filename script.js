@@ -308,11 +308,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             return 8;
         } else if (dayOfWeek >= 1 && dayOfWeek <= 4) { // Lunes-Jueves
             return 9;
-        } else if (dayOfWeek === 6) { // Sábado
+        } else if (dayOfWeek === 6 || dayOfWeek === 0) { // Sábado o Domingo
             return 0; // Todo son horas extra
         }
-        // Domingo
-        return 9; // Por defecto
+        // Por defecto
+        return 9;
     }
     
     function getDayTypeName(date = new Date()) {
@@ -324,8 +324,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             return "Dilluns-Dijous";
         } else if (dayOfWeek === 6) {
             return "Dissabte";
+        } else if (dayOfWeek === 0) {
+            return "Diumenge";
         }
-        return "Diumenge";
+        return "Desconegut";
     }
     
     function getStandardWorkDayFormatted(standard) {
@@ -354,13 +356,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         const standardWorkDay = appState.workDayStandard || 9;
         const extraTime = Math.max(0, totalJourneyTime - standardWorkDay);
         
+        // 🔍 DEBUG: Log para diagnosticar problemas
+        console.log('🔍 DEBUG CALCULATE EXTRA HOURS:');
+        console.log('- workStartTime:', appState.workStartTime);
+        console.log('- totalJourneyTime:', totalJourneyTime);
+        console.log('- standardWorkDay:', standardWorkDay);
+        console.log('- workDayType:', appState.workDayType);
+        console.log('- workDayStandard:', appState.workDayStandard);
+        
         // Solo contar como extra si es >= 30 minutos (excepto sábados)
         let extraHours = 0;
         if (standardWorkDay === 0) {
-            // Sábado: todo son horas extra
+            // Sábado/Domingo: todo son horas extra
             extraHours = totalJourneyTime;
+            console.log('- Es fin de semana: extraHours =', extraHours);
         } else {
             extraHours = extraTime >= 0.5 ? extraTime : 0;
+            console.log('- Día laboral: extraTime =', extraTime, ', extraHours =', extraHours);
         }
         
         const extraBlocks = Math.floor(extraHours / 0.5); // Bloques de 30min
@@ -469,29 +481,35 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
                 logActivity(`⏰ Jornada total: ${totalHoursFormatted} (estàndard ${dayType}: ${standardFormatted})`);
                 
-                // 🆕 LÓGICA ESPECIAL PARA SÁBADOS
+                // 🆕 LÓGICA CORREGIDA PARA TODOS LOS DÍAS
                 if (standardWorkDay === 0) {
-                    // Sábado: siempre pedir observaciones
-                    const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                    let extraText = '';
-                    if (totalBlocks === 1) {
-                        extraText = '+30min';
-                    } else if (totalBlocks === 2) {
-                        extraText = '+1h';
-                    } else {
-                        const hours = Math.floor(totalBlocks / 2);
-                        const mins = (totalBlocks % 2) * 30;
-                        if (mins === 0) {
-                            extraText = `+${hours}h`;
+                    // Sábado/Domingo: TODO es hora extra si >= 30 minutos
+                    if (extraInfo.totalHours >= 0.5) {
+                        const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+                        let extraText = '';
+                        if (totalBlocks === 1) {
+                            extraText = '+30min';
+                        } else if (totalBlocks === 2) {
+                            extraText = '+1h';
                         } else {
-                            extraText = `+${hours}h${mins}min`;
+                            const hours = Math.floor(totalBlocks / 2);
+                            const mins = (totalBlocks % 2) * 30;
+                            if (mins === 0) {
+                                extraText = `+${hours}h`;
+                            } else {
+                                extraText = `+${hours}h${mins}min`;
+                            }
                         }
+                        logActivity(`💰 ${dayType}: ${extraText} d'hores extra (tot és extra)`);
+                        alert(`💰 ${dayType}: ${extraText} d'hores extra detectades.\n\nHas d'afegir observacions obligatòriament.`);
+                        observations = await showObservationsModal(extraText);
+                    } else {
+                        // Menos de 30 minutos en sábado/domingo
+                        const extraMinutes = Math.round(extraInfo.totalHours * 60);
+                        logActivity(`ℹ️ ${dayType}: ${extraMinutes} minuts treballats (menys de 30min, no cal observacions)`);
                     }
-                    logActivity(`💰 Dissabte: ${extraText} d'hores extra (tot és extra)`);
-                    alert(`💰 Dissabte: ${extraText} d'hores extra detectades.\n\nHas d'afegir observacions obligatòriament.`);
-                    observations = await showObservationsModal(extraText);
                 } else if (extraInfo.extraHours >= 0.5) {
-                    // Lunes-Jueves o Viernes con horas extra
+                    // Lunes-Jueves (9h) o Viernes (8h) con horas extra >= 30min
                     const extraBlocks = extraInfo.extraBlocks;
                     let extraText = '';
                     if (extraBlocks === 1) {
@@ -551,30 +569,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         const dayType = appState.workDayType || 'Desconegut';
         const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
         
+        // 🔍 DEBUG: Mostrar valores exactos para diagnóstico
+        console.log('🔍 DEBUG TIME REPORT:');
+        console.log('- totalHours:', extraInfo.totalHours);
+        console.log('- standardWorkDay:', standardWorkDay);
+        console.log('- extraHours:', extraInfo.extraHours);
+        console.log('- extraBlocks:', extraInfo.extraBlocks);
+        console.log('- dayType:', dayType);
+        
         let reportMessage = `📊 RESUM DE TEMPS ACTUAL:\n\n`;
         reportMessage += `⏰ Jornada total: ${totalHoursFormatted}\n`;
         reportMessage += `📅 Dia: ${dayType}\n`;
         reportMessage += `🎯 Estàndard: ${standardFormatted}\n\n`;
         
         if (standardWorkDay === 0) {
-            // Sábado: todo es extra
-            const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-            let extraText = '';
-            if (totalBlocks === 1) {
-                extraText = '+30min';
-            } else if (totalBlocks === 2) {
-                extraText = '+1h';
-            } else {
-                const hours = Math.floor(totalBlocks / 2);
-                const mins = (totalBlocks % 2) * 30;
-                if (mins === 0) {
-                    extraText = `+${hours}h`;
+            // Sábado/Domingo: todo es extra si >= 30 minutos
+            if (extraInfo.totalHours >= 0.5) {
+                const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+                let extraText = '';
+                if (totalBlocks === 1) {
+                    extraText = '+30min';
+                } else if (totalBlocks === 2) {
+                    extraText = '+1h';
                 } else {
-                    extraText = `+${hours}h${mins}min`;
+                    const hours = Math.floor(totalBlocks / 2);
+                    const mins = (totalBlocks % 2) * 30;
+                    if (mins === 0) {
+                        extraText = `+${hours}h`;
+                    } else {
+                        extraText = `+${hours}h${mins}min`;
+                    }
                 }
+                reportMessage += `💰 Hores extra: ${extraText}\n`;
+                reportMessage += `✅ ${dayType}: tot és hora extra`;
+            } else {
+                const extraMinutes = Math.round(extraInfo.totalHours * 60);
+                reportMessage += `ℹ️ Temps treballat: ${extraMinutes} minuts\n`;
+                reportMessage += `⚠️ Menys de 30min, no cal observacions`;
             }
-            reportMessage += `💰 Hores extra: ${extraText}\n`;
-            reportMessage += `✅ Dissabte: tot és hora extra`;
         } else if (extraInfo.extraHours >= 0.5) {
             const extraBlocks = extraInfo.extraBlocks;
             let extraText = '';
@@ -1160,8 +1192,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const todayType = getDayTypeName(today);
                 
                 if (todayStandard === 0) {
-                    // Sábado
-                    dom.infoMessage.textContent = `💰 Avui és ${todayType}: Tot el temps serà hora extra. Cal afegir observacions.`;
+                    // Sábado o Domingo
+                    dom.infoMessage.textContent = `💰 Avui és ${todayType}: Tot el temps serà hora extra (mínim 30min). Cal afegir observacions.`;
                 } else {
                     dom.infoMessage.textContent = `📅 Avui és ${todayType} (${getStandardWorkDayFormatted(todayStandard)} estàndard). Mantingues l'app oberta durant les pauses.`;
                 }
