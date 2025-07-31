@@ -552,89 +552,55 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Función para añadir observaciones manualmente
-    async function addObservationsManually() {
-        const observations = await showObservationsModal();
-        if (observations.trim()) {
-            logActivity(`📝 Observacions afegides: ${observations}`);
-            // Aquí podrías enviar las observaciones a un endpoint específico si fuera necesario
-        }
-    }
-    
-    // 🆕 NUEVA FUNCIÓN: Mostrar resumen de tiempo actual con horario dinámico
-    function showTimeReport() {
-        const extraInfo = calculateExtraHours();
-        const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
-        const standardWorkDay = extraInfo.standardWorkDay;
-        const dayType = appState.workDayType || 'Desconegut';
-        const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
+    // 🚨 FUNCIÓ D'EMERGÈNCIA: Reset intel·ligent de pausa bloquejada
+    function emergencyResetPause() {
+        const confirmReset = confirm(
+            '🚨 RESET D\'EMERGÈNCIA\n\n' +
+            'Això arreglarà l\'estat de pausa bloquejada mantenint:\n' +
+            '✅ L\'hora d\'inici de jornada\n' +
+            '✅ El temps total treballat\n' +
+            '✅ Les pauses anteriors\n\n' +
+            'Vols continuar?'
+        );
         
-        // 🔍 DEBUG: Mostrar valores exactos para diagnóstico
-        console.log('🔍 DEBUG TIME REPORT:');
-        console.log('- totalHours:', extraInfo.totalHours);
-        console.log('- standardWorkDay:', standardWorkDay);
-        console.log('- extraHours:', extraInfo.extraHours);
-        console.log('- extraBlocks:', extraInfo.extraBlocks);
-        console.log('- dayType:', dayType);
+        if (!confirmReset) return;
         
-        let reportMessage = `📊 RESUM DE TEMPS ACTUAL:\n\n`;
-        reportMessage += `⏰ Jornada total: ${totalHoursFormatted}\n`;
-        reportMessage += `📅 Dia: ${dayType}\n`;
-        reportMessage += `🎯 Estàndard: ${standardFormatted}\n\n`;
-        
-        if (standardWorkDay === 0) {
-            // Sábado/Domingo: todo es extra si >= 30 minutos
-            if (extraInfo.totalHours >= 0.5) {
-                const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                let extraText = '';
-                if (totalBlocks === 1) {
-                    extraText = '+30min';
-                } else if (totalBlocks === 2) {
-                    extraText = '+1h';
-                } else {
-                    const hours = Math.floor(totalBlocks / 2);
-                    const mins = (totalBlocks % 2) * 30;
-                    if (mins === 0) {
-                        extraText = `+${hours}h`;
-                    } else {
-                        extraText = `+${hours}h${mins}min`;
-                    }
-                }
-                reportMessage += `💰 Hores extra: ${extraText}\n`;
-                reportMessage += `✅ ${dayType}: tot és hora extra`;
-            } else {
-                const extraMinutes = Math.round(extraInfo.totalHours * 60);
-                reportMessage += `ℹ️ Temps treballat: ${extraMinutes} minuts\n`;
-                reportMessage += `⚠️ Menys de 30min, no cal observacions`;
+        try {
+            // Calcular i afegir la pausa actual al temps total si existeix
+            if (appState.currentPauseStart) {
+                const pauseStartTime = new Date(appState.currentPauseStart);
+                const pauseDuration = new Date() - pauseStartTime;
+                appState.totalPauseTimeToday += pauseDuration;
+                logActivity(`⚠️ Reset d'emergència: Pausa de ${Math.round(pauseDuration/60000)}min afegida al total`);
             }
-        } else if (extraInfo.extraHours >= 0.5) {
-            const extraBlocks = extraInfo.extraBlocks;
-            let extraText = '';
-            if (extraBlocks === 1) {
-                extraText = '+30min';
-            } else if (extraBlocks === 2) {
-                extraText = '+1h';
-            } else {
-                const hours = Math.floor(extraBlocks / 2);
-                const mins = (extraBlocks % 2) * 30;
-                if (mins === 0) {
-                    extraText = `+${hours}h`;
-                } else {
-                    extraText = `+${hours}h${mins}min`;
-                }
-            }
-            reportMessage += `💰 Hores extra: ${extraText}\n`;
-            reportMessage += `✅ Es considera hora extra (≥30min)`;
-        } else if (extraInfo.totalHours > standardWorkDay) {
-            const extraMinutes = Math.round((extraInfo.totalHours - standardWorkDay) * 60);
-            reportMessage += `ℹ️ Temps extra: ${extraMinutes} minuts\n`;
-            reportMessage += `⚠️ No es considera hora extra (<30min)`;
-        } else {
-            reportMessage += `✅ Dins del temps estàndard`;
+            
+            // Reset NOMÉS l'estat de pausa
+            appState.currentState = 'JORNADA';
+            appState.currentPauseStart = null;
+            appState.currentPauseType = null;
+            appState.isAlarmPlaying = false;
+            appState.pauseAlarmTriggered = false;
+            
+            // Neteja els elements de pausa
+            dom.infoMessage.classList.remove('success', 'alert');
+            dom.infoMessage.textContent = '';
+            
+            // Cancel·lar alarmes i wake lock
+            cancelScheduledNotification();
+            releaseWakeLock();
+            
+            // Guardar i actualitzar
+            saveState();
+            updateUI();
+            
+            logActivity('🚨 Reset d\'emergència completat: Tornat a jornada normal');
+            alert('✅ Reset completat!\n\nL\'app ha tornat al mode jornada normal.\nTotes les dades de temps s\'han conservat.');
+            
+        } catch (error) {
+            console.error('Error en reset d\'emergència:', error);
+            logActivity(`❌ Error en reset d'emergència: ${error.message}`);
+            alert('❌ Error en el reset. Prova recarregar la pàgina.');
         }
-        
-        alert(reportMessage);
-        logActivity(`📊 Resum mostrat: ${totalHoursFormatted} total (${dayType})`);
     }
 
     function startWorkday() {
@@ -1028,16 +994,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             case 'ALMACEN':
                  createButton('▶️ Sortir Magatzem i Iniciar Jornada (9 → J)', 'btn-start', endAlmacenAndStartWorkday);
                  createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
-                 createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
-                 // 🆕 NUEVO: Botón para ver resumen de tiempo
-                 createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
                 break;
             case 'JORNADA':
                 createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause);
                 createButton('⛔ Finalitzar Jornada (J)', 'btn-stop', endWorkday);
-                createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
-                // 🆕 NUEVO: Botón para ver resumen de tiempo
-                createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
                 break;
             case 'PAUSA':
                 // Mostrar tipo de pausa actual
@@ -1061,9 +1021,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
                     alert('Has de sortir de la pausa abans de finalitzar la jornada.');
                 }, true);
-                createButton('📝 Afegir Observacions', 'btn-secondary', addObservationsManually);
-                // 🆕 NUEVO: Botón para ver resumen de tiempo
-                createButton('📊 Resum de Temps', 'btn-secondary', showTimeReport);
+                
+                // 🚨 Botó d'emergència només visible en pausa
+                createButton('🚨 Reset d\'Emergència', 'btn-emergency', emergencyResetPause);
                 break;
         }
     }
@@ -1095,9 +1055,72 @@ document.addEventListener('DOMContentLoaded', async () => {
         generateDynamicButtons();
     }
     
+    // 🔍 VALIDACIÓ AUTOMÀTICA D'ESTAT (Anti-bloquejos)
+    function validateAppState() {
+        try {
+            // Detectar estat inconsistent de pausa
+            if (appState.currentState === 'PAUSA') {
+                // Si estem en pausa però no tenim temps d'inici, és inconsistent
+                if (!appState.currentPauseStart) {
+                    logActivity('⚠️ Estat inconsistent detectat: Pausa sense temps d\'inici');
+                    appState.currentState = 'JORNADA';
+                    appState.currentPauseType = null;
+                    appState.isAlarmPlaying = false;
+                    appState.pauseAlarmTriggered = false;
+                    saveState();
+                    updateUI();
+                    logActivity('🔧 Auto-correcció: Tornat a jornada normal');
+                    return true;
+                }
+                
+                // Si la pausa porta més de 2 hores (probable error)
+                const pauseStart = new Date(appState.currentPauseStart);
+                const pauseDuration = new Date() - pauseStart;
+                if (pauseDuration > 2 * 60 * 60 * 1000) { // 2 hores
+                    logActivity('⚠️ Pausa excessivament llarga detectada (>2h)');
+                    // Afegir pausa al total i resetar
+                    appState.totalPauseTimeToday += pauseDuration;
+                    appState.currentState = 'JORNADA';
+                    appState.currentPauseStart = null;
+                    appState.currentPauseType = null;
+                    appState.isAlarmPlaying = false;
+                    appState.pauseAlarmTriggered = false;
+                    saveState();
+                    updateUI();
+                    logActivity('🔧 Auto-correcció: Pausa de 2h afegida al total');
+                    return true;
+                }
+            }
+            
+            // Detectar jornada sense temps d'inici
+            if ((appState.currentState === 'JORNADA' || appState.currentState === 'PAUSA') && !appState.workStartTime) {
+                logActivity('⚠️ Estat inconsistent: Jornada sense temps d\'inici');
+                appState.currentState = 'FUERA';
+                appState.currentPauseStart = null;
+                appState.currentPauseType = null;
+                saveState();
+                updateUI();
+                logActivity('🔧 Auto-correcció: Reset a estat inicial');
+                return true;
+            }
+            
+            return false; // No hi ha hagut correccions
+        } catch (error) {
+            console.error('Error en validació d\'estat:', error);
+            logActivity(`❌ Error en validació automàtica: ${error.message}`);
+            return false;
+        }
+    }
+    
     // --- INICIALIZACIÓN OPTIMIZADA PARA VERCEL ---
     async function init() {
         loadState();
+        
+        // 🔍 VALIDACIÓ INICIAL D'ESTAT
+        const wasFixed = validateAppState();
+        if (wasFixed) {
+            logActivity('✅ Estat de l\'app validat i corregit automàticament');
+        }
         
         // 🔔 SOLICITAR PERMISOS IMPORTANTES AL INICIO
         
@@ -1142,6 +1165,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateTimers();
             generateDynamicButtons(); // Para actualizar el estado del botón de pausa
         }, 1000);
+        
+        // 🔍 Validació automàtica cada 30 segons per detectar problemes
+        setInterval(() => {
+            const wasFixed = validateAppState();
+            if (wasFixed) {
+                logActivity('🔧 Problema detectat i solucionat automàticament');
+            }
+        }, 30000); // Cada 30 segons
         
         // Petición inicial para calentar GPS
         getCurrentLocation().catch(err => {
