@@ -559,57 +559,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 🚨 FUNCIÓ D'EMERGÈNCIA: Reset intel·ligent de pausa bloquejada
-    function emergencyResetPause() {
-        const confirmReset = confirm(
-            '🚨 RESET D\'EMERGÈNCIA\n\n' +
-            'Això arreglarà l\'estat de pausa bloquejada mantenint:\n' +
-            '✅ L\'hora d\'inici de jornada\n' +
-            '✅ El temps total treballat\n' +
-            '✅ Les pauses anteriors\n\n' +
-            'Vols continuar?'
-        );
-        
-        if (!confirmReset) return;
-        
-        try {
-            // Calcular i afegir la pausa actual al temps total si existeix
-            if (appState.currentPauseStart) {
-                const pauseStartTime = new Date(appState.currentPauseStart);
-                const pauseDuration = new Date() - pauseStartTime;
-                appState.totalPauseTimeToday += pauseDuration;
-                logActivity(`⚠️ Reset d'emergència: Pausa de ${Math.round(pauseDuration/60000)}min afegida al total`);
-            }
-            
-            // Reset NOMÉS l'estat de pausa
-            appState.currentState = 'JORNADA';
-            appState.currentPauseStart = null;
-            appState.currentPauseType = null;
-            appState.isAlarmPlaying = false;
-            appState.pauseAlarmTriggered = false;
-            appState.lastAlarmTime = null; // 🔧 Resetear tiempo de última alarma
-            
-            // Neteja els elements de pausa
-            dom.infoMessage.classList.remove('success', 'alert');
-            dom.infoMessage.textContent = '';
-            
-            // Cancel·lar alarmes i wake lock
-            cancelScheduledNotification();
-            releaseWakeLock();
-            
-            // Guardar i actualitzar
-            saveState();
-            updateUI();
-            
-            logActivity('🚨 Reset d\'emergència completat: Tornat a jornada normal');
-            alert('✅ Reset completat!\n\nL\'app ha tornat al mode jornada normal.\nTotes les dades de temps s\'han conservat.');
-            
-        } catch (error) {
-            console.error('Error en reset d\'emergència:', error);
-            logActivity(`❌ Error en reset d'emergència: ${error.message}`);
-            alert('❌ Error en el reset. Prova recarregar la pàgina.');
-        }
-    }
 
     function startWorkday() {
         handleAction([
@@ -1036,8 +985,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     alert('Has de sortir de la pausa abans de finalitzar la jornada.');
                 }, true);
                 
-                // 🚨 Botó d'emergència només visible en pausa
-                createButton('🚨 Reset d\'Emergència', 'btn-emergency', emergencyResetPause);
                 break;
         }
     }

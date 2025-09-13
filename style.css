@@ -7,8 +7,6 @@
     --primary-green: #34c759;
     --primary-orange: #ff9500;
     --primary-red: #ff3b30;
-    --emergency-red: #dc3545;
-    --emergency-bg: #f8d7da;
     --vercel-purple: #7c3aed;
     --gray-light: #e5e5ea;
     --gray-dark: #d1d1d6;
@@ -245,17 +243,6 @@ body {
 }
 .btn-secondary { 
     background: linear-gradient(135deg, var(--primary-blue), var(--vercel-purple));
-}
-.btn-emergency {
-    background: linear-gradient(135deg, var(--emergency-red), #b02a37) !important;
-    border: 2px solid var(--emergency-red);
-    animation: pulse-emergency 2s infinite;
-}
-
-@keyframes pulse-emergency {
-    0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
-    70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
 }
 
 .btn:disabled {
