@@ -65,12 +65,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentLocation: null,
         isAlarmPlaying: false,
         pauseAlarmTriggered: false,
+        lastAlarmTime: null, // 🔧 Para permitir alarmas recurrentes
         wakeLock: null, // Para mantener pantalla activa
         // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
         workDayStandard: null, // 8 o 9 según el día
         workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
         workStartDay: null     // Día de inicio de jornada
     };
+
+    // 🔧 Variable para detectar cambios de estado y evitar regeneración innecesaria de botones
+    let lastKnownState = null;
 
     function saveState() {
         localStorage.setItem('beta10AppState', JSON.stringify(appState));
@@ -86,6 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workStartTime: parsedState.workStartTime ? new Date(parsedState.workStartTime) : null,
                 currentPauseStart: parsedState.currentPauseStart ? new Date(parsedState.currentPauseStart) : null,
                 currentPauseType: parsedState.currentPauseType || null,
+                lastAlarmTime: parsedState.lastAlarmTime ? new Date(parsedState.lastAlarmTime) : null, // 🔧 Restaurar tiempo de última alarma
                 // 🆕 MANTENER HORARIO DINÁMICO
                 workDayStandard: parsedState.workDayStandard || null,
                 workDayType: parsedState.workDayType || null,
@@ -97,6 +102,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 logActivity("Estat recuperat de la sessió anterior.");
             }
         }
+        // 🔧 Inicializar lastKnownState después de cargar el estado
+        lastKnownState = appState.currentState;
     }
     
     function logActivity(message) {
@@ -580,6 +587,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             appState.currentPauseType = null;
             appState.isAlarmPlaying = false;
             appState.pauseAlarmTriggered = false;
+            appState.lastAlarmTime = null; // 🔧 Resetear tiempo de última alarma
             
             // Neteja els elements de pausa
             dom.infoMessage.classList.remove('success', 'alert');
@@ -708,6 +716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         appState.currentPauseStart = null;
                         appState.currentPauseType = null;
                         appState.pauseAlarmTriggered = false;
+                        appState.lastAlarmTime = null; // 🔧 Resetear tiempo de última alarma
                         stopAlarm();
                         
                         // Limpiar mensaje de pausa
@@ -871,9 +880,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function playPauseAlarm(pauseType) {
-        if (!appState.pauseAlarmTriggered) {
+        const now = new Date();
+        const timeSinceLastAlarm = appState.lastAlarmTime ? now - appState.lastAlarmTime : Infinity;
+        
+        // 🔧 Permitir alarma si es la primera vez O han pasado al menos 2 minutos desde la última
+        if (!appState.pauseAlarmTriggered || timeSinceLastAlarm > 2 * 60 * 1000) {
             appState.pauseAlarmTriggered = true;
             appState.isAlarmPlaying = true;
+            appState.lastAlarmTime = now;
             
             // 🚨 ALARMA MEJORADA - MÁS PERSISTENTE
             
@@ -1163,7 +1177,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Actualizar timers cada segundo
         setInterval(() => {
             updateTimers();
-            generateDynamicButtons(); // Para actualizar el estado del botón de pausa
+            // 🔧 Solo regenerar botones si cambia el estado (evita bug de botones deshabilitados)
+            if (lastKnownState !== appState.currentState) {
+                generateDynamicButtons();
+                lastKnownState = appState.currentState;
+            }
         }, 1000);
         
         // 🔍 Validació automàtica cada 30 segons per detectar problemes
