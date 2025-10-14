@@ -76,6 +76,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔧 Variable para detectar cambios de estado y evitar regeneración innecesaria de botones
     let lastKnownState = null;
 
+    // 🚨 BUG FIX #1: Variable global para intervalo de alarma (evita múltiples intervalos simultáneos)
+    let alarmIntervalGlobal = null;
+
     function saveState() {
         localStorage.setItem('beta10AppState', JSON.stringify(appState));
     }
@@ -84,18 +87,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         const savedState = localStorage.getItem('beta10AppState');
         if (savedState) {
             const parsedState = JSON.parse(savedState);
+
+            // 🚨 BUG FIX #2: VALIDAR timestamps antes de usar
+            const workStartTime = parsedState.workStartTime ? new Date(parsedState.workStartTime) : null;
+            const currentPauseStart = parsedState.currentPauseStart ? new Date(parsedState.currentPauseStart) : null;
+            const lastAlarmTime = parsedState.lastAlarmTime ? new Date(parsedState.lastAlarmTime) : null;
+
+            // VERIFICAR si las fechas son válidas
+            const isValidWorkStart = workStartTime && !isNaN(workStartTime.getTime());
+            const isValidPauseStart = currentPauseStart && !isNaN(currentPauseStart.getTime());
+            const isValidAlarmTime = lastAlarmTime && !isNaN(lastAlarmTime.getTime());
+
             // Convertir strings de fecha a objetos Date
             appState = {
                 ...parsedState,
-                workStartTime: parsedState.workStartTime ? new Date(parsedState.workStartTime) : null,
-                currentPauseStart: parsedState.currentPauseStart ? new Date(parsedState.currentPauseStart) : null,
+                workStartTime: isValidWorkStart ? workStartTime : null,
+                currentPauseStart: isValidPauseStart ? currentPauseStart : null,
                 currentPauseType: parsedState.currentPauseType || null,
-                lastAlarmTime: parsedState.lastAlarmTime ? new Date(parsedState.lastAlarmTime) : null, // 🔧 Restaurar tiempo de última alarma
+                lastAlarmTime: isValidAlarmTime ? lastAlarmTime : null,
                 // 🆕 MANTENER HORARIO DINÁMICO
                 workDayStandard: parsedState.workDayStandard || null,
                 workDayType: parsedState.workDayType || null,
                 workStartDay: parsedState.workStartDay || null
             };
+
+            // LOG si hay timestamps inválidos
+            if (!isValidWorkStart && parsedState.workStartTime) {
+                logActivity('⚠️ Timestamp de inicio de jornada inválido - resetejat');
+            }
+            if (!isValidPauseStart && parsedState.currentPauseStart) {
+                logActivity('⚠️ Timestamp de inicio de pausa inválido - resetejat');
+            }
+
             if (appState.workDayType) {
                 logActivity(`Estat recuperat: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)})`);
             } else {
@@ -872,9 +895,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             dom.infoMessage.classList.add('alert');
             
             logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
-            
+
+            // 🚨 BUG FIX #1: Limpiar intervalo anterior ANTES de crear uno nuevo
+            if (alarmIntervalGlobal) {
+                clearInterval(alarmIntervalGlobal);
+                alarmIntervalGlobal = null;
+            }
+
             // 5. Repetir alarma cada 30 segundos hasta que vuelva
-            const alarmInterval = setInterval(() => {
+            alarmIntervalGlobal = setInterval(() => {
                 if (appState.currentState === 'PAUSA' && appState.isAlarmPlaying) {
                     createBeepSound('strong');
                     if ('vibrate' in navigator) {
@@ -882,7 +911,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                     logActivity(`🔔 Recordatori: Temps de ${pauseType} completat`);
                 } else {
-                    clearInterval(alarmInterval);
+                    clearInterval(alarmIntervalGlobal);
+                    alarmIntervalGlobal = null;
                 }
             }, 30000); // Cada 30 segundos
         }
@@ -890,6 +920,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function stopAlarm() {
         appState.isAlarmPlaying = false;
+
+        // 🚨 BUG FIX #1: Limpiar intervalo global de alarma
+        if (alarmIntervalGlobal) {
+            clearInterval(alarmIntervalGlobal);
+            alarmIntervalGlobal = null;
+        }
+
         dom.infoMessage.classList.remove('alert');
         dom.infoMessage.classList.remove('success');
         dom.infoMessage.textContent = "";
@@ -926,7 +963,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (appState.currentPauseType && PAUSE_LIMITS[appState.currentPauseType]) {
                     const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
                     if (currentPauseDuration >= pauseLimit) {
-                        playPauseAlarm(appState.currentPauseType);
+                        // 🚨 BUG FIX #5: Solo llamar alarma si NO está sonando ya
+                        if (!appState.isAlarmPlaying) {
+                            playPauseAlarm(appState.currentPauseType);
+                        }
                     }
                 }
 
@@ -938,8 +978,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     function generateDynamicButtons() {
+        // 🚨 BUG FIX #4: VALIDAR estado antes de limpiar botones
+        if (!appState.currentState ||
+            !['FUERA', 'JORNADA', 'PAUSA', 'ALMACEN'].includes(appState.currentState)) {
+            logActivity(`⚠️ generateDynamicButtons: Estado inválido "${appState.currentState}" - NO limpiar botones`);
+            return; // No borrar botones si el estado es inválido
+        }
+
         dom.buttonContainer.innerHTML = ''; // Limpiar botones
-        
+
         const createButton = (text, className, action, disabled = false) => {
             const btn = document.createElement('button');
             btn.textContent = text;
@@ -991,27 +1038,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     function updateUI() {
         let stateText = '--';
-        
+
+        // 🚨 BUG FIX #3: VALIDAR currentState antes de usar
+        if (!appState.currentState ||
+            !['FUERA', 'JORNADA', 'PAUSA', 'ALMACEN'].includes(appState.currentState)) {
+            // Estado inválido detectado - resetear a FUERA
+            logActivity(`⚠️ Estado inválido detectado: "${appState.currentState}" - Resetejant a FUERA`);
+            appState.currentState = 'FUERA';
+            appState.workStartTime = null;
+            appState.currentPauseStart = null;
+            appState.currentPauseType = null;
+            appState.isAlarmPlaying = false;
+            appState.pauseAlarmTriggered = false;
+            saveState();
+        }
+
         // 🆕 INCLUIR TIPO DE DÍA EN EL ESTADO
         const dayInfo = appState.workDayType ? ` - ${appState.workDayType}` : '';
         const standardInfo = appState.workDayStandard !== null ? ` (${getStandardWorkDayFormatted(appState.workDayStandard)})` : '';
-        
+
         switch (appState.currentState) {
-            case 'FUERA': 
-                stateText = 'Fora de Jornada'; 
+            case 'FUERA':
+                stateText = 'Fora de Jornada';
                 break;
-            case 'JORNADA': 
-                stateText = `En Jornada${dayInfo}${standardInfo}`; 
+            case 'JORNADA':
+                stateText = `En Jornada${dayInfo}${standardInfo}`;
                 break;
-            case 'PAUSA': 
+            case 'PAUSA':
                 const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
                 stateText = `En Pausa${pauseTypeText}${dayInfo}`;
                 break;
-            case 'ALMACEN': 
-                stateText = `En Magatzem${dayInfo}${standardInfo}`; 
+            case 'ALMACEN':
+                stateText = `En Magatzem${dayInfo}${standardInfo}`;
                 break;
+            default:
+                // Fallback adicional (no debería llegar aquí)
+                logActivity(`❌ Estado desconocido en switch: "${appState.currentState}"`);
+                stateText = 'Error de Estado';
         }
-        
+
         dom.currentStateText.textContent = stateText;
         generateDynamicButtons();
     }
@@ -1107,7 +1172,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await scheduleNotification(appState.currentPauseType, remaining);
                     logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {
-                    // Ja ha passat el temps, activar alarma
+                    // Já ha passat el temps, activar alarma
+                    // 🚨 BUG FIX #6: Marcar isAlarmPlaying ANTES de llamar para evitar duplicación
+                    appState.isAlarmPlaying = true;
                     playPauseAlarm(appState.currentPauseType);
                 }
             }
