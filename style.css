@@ -44,13 +44,6 @@ body {
     flex: 1 0 auto;
 }
 
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
 .account-btn {
     background: linear-gradient(135deg, var(--primary-blue), var(--vercel-purple));
     color: white;
@@ -80,37 +73,49 @@ body {
     box-shadow: 0 1px 4px rgba(0, 122, 255, 0.4);
 }
 
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px; /* AUMENTADO de 20px */
+    padding-top: 8px;
+}
+
 .header h1 {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 28px; /* AUMENTADO de 24px */
+    font-weight: 700; /* AUMENTADO de 600 */
     margin: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px; /* AUMENTADO de 8px */
+    letter-spacing: -0.5px; /* NUEVO: Más compacto */
 }
 
 .logo-text {
     display: inline-flex;
     align-items: baseline;
-    font-family: 'Arial Black', sans-serif;
+    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
     font-weight: 900;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1)); /* NUEVO: Sombra sutil */
 }
 
 .nine-text {
     color: #e74c3c;
-    font-size: 28px;
+    font-size: 32px; /* AUMENTADO de 28px */
 }
 
 .t-text {
     color: #2c3e50;
-    font-size: 28px;
+    font-size: 32px; /* AUMENTADO de 28px */
 }
 
+/* NUEVO: Beta10 con degradado más sutil */
 .header h1 > span:not(.logo-text) {
-    background: linear-gradient(135deg, var(--primary-blue), var(--vercel-purple));
+    background: linear-gradient(135deg, #5856d6 0%, var(--primary-blue) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    font-weight: 600; /* Más ligero que logo */
 }
 
 .status-indicator {
@@ -130,33 +135,78 @@ body {
 
 .status-card, .timer-card, .log-card {
     background-color: var(--card-bg-color);
-    border-radius: 12px;
-    padding: 15px;
-    margin-bottom: 15px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border-radius: 16px; /* AUMENTADO de 12px */
+    padding: 20px; /* AUMENTADO de 15px */
+    margin-bottom: 16px; /* AJUSTADO */
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08); /* MEJORADO */
+    border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.status-card {
+    background: linear-gradient(135deg, var(--card-bg-color) 0%,
+                                 var(--bg-color) 100%); /* NUEVO: Gradiente sutil */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.status-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
 }
 
 .status-card p {
-    margin: 0 0 5px 0;
+    margin: 0 0 8px 0; /* AUMENTADO de 5px */
     color: var(--subtle-text-color);
-    font-size: 14px;
+    font-size: 13px; /* REDUCIDO de 14px */
+    font-weight: 600; /* NUEVO */
+    text-transform: uppercase; /* NUEVO */
+    letter-spacing: 0.5px; /* NUEVO */
 }
 
 .status-card h2 {
     margin: 0;
-    font-size: 28px;
+    font-size: 32px; /* AUMENTADO de 28px */
     font-weight: 700;
+    line-height: 1.1; /* NUEVO */
 }
 
 .timer-card {
-    display: flex;
-    justify-content: space-around;
+    display: grid; /* CAMBIADO de flex */
+    grid-template-columns: 1fr auto 1fr; /* NUEVO: 3 columnas */
+    gap: 16px; /* NUEVO */
+    align-items: center;
+}
+
+.timer-card .timer {
     text-align: center;
+    padding: 12px; /* NUEVO */
+    border-radius: 12px; /* NUEVO */
+    background: rgba(0, 0, 0, 0.02); /* NUEVO: Fondo sutil */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timer-card .timer:hover {
+    background: rgba(0, 0, 0, 0.04);
+    transform: scale(1.02);
+}
+
+/* NUEVO: Separador visual */
+.timer-card .timer-separator {
+    width: 1px;
+    height: 60px;
+    background: linear-gradient(to bottom,
+                                transparent 0%,
+                                var(--gray-light) 50%,
+                                transparent 100%);
 }
 
 .timer-card .timer span {
     color: var(--subtle-text-color);
-    font-size: 14px;
+    font-size: 12px; /* REDUCIDO */
+    font-weight: 600; /* NUEVO */
+    text-transform: uppercase; /* NUEVO */
+    letter-spacing: 0.5px; /* NUEVO */
+    display: block; /* NUEVO */
+    margin-bottom: 4px; /* NUEVO */
 }
 
 .timer-card .timer p {
@@ -308,10 +358,31 @@ body {
 }
 
 .btn:disabled {
-    background: linear-gradient(135deg, var(--gray-dark), #adb5bd);
+    background: var(--gray-light) !important; /* SIMPLIFICADO */
+    color: var(--subtle-text-color) !important;
     cursor: not-allowed;
-    opacity: 0.6;
+    opacity: 0.7;
     transform: none;
+    box-shadow: none;
+    /* NUEVO: Indicador visual adicional */
+    position: relative;
+    overflow: hidden;
+}
+
+.btn:disabled::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(255, 255, 255, 0.1) 10px,
+        rgba(255, 255, 255, 0.1) 20px
+    );
 }
 
 .btn:disabled:hover {
@@ -319,10 +390,37 @@ body {
     box-shadow: none;
 }
 
+.log-card {
+    position: relative; /* NUEVO */
+}
+
 .log-card h3 {
-    margin: 0 0 10px 0;
-    font-size: 16px;
-    font-weight: 600;
+    margin: 0 0 12px 0; /* AUMENTADO */
+    font-size: 15px; /* REDUCIDO */
+    font-weight: 700; /* AUMENTADO */
+    text-transform: uppercase; /* NUEVO */
+    letter-spacing: 0.5px; /* NUEVO */
+    color: var(--text-color);
+}
+
+/* NUEVO: Indicador de scroll */
+.log-card::after {
+    content: '';
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    right: 20px;
+    height: 30px;
+    background: linear-gradient(to bottom,
+                                transparent,
+                                var(--card-bg-color));
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.log-card[data-has-scroll="true"]::after {
+    opacity: 1;
 }
 
 #log-container {
@@ -552,50 +650,203 @@ body {
     100% { transform: rotate(360deg); }
 }
 
-/* Responsive */
-@media (max-width: 480px) {
+/* Responsive mejorado */
+/* Móviles pequeños (hasta 375px) */
+@media (max-width: 375px) {
     .container {
-        padding: 10px;
+        padding: 12px;
     }
-    
+
     .header h1 {
         font-size: 20px;
     }
-    
+
+    .nine-text, .t-text {
+        font-size: 24px;
+    }
+
+    .status-card h2 {
+        font-size: 26px;
+    }
+
     .timer-card .timer p {
         font-size: 22px;
     }
-    
+
     .btn {
-        font-size: 16px;
-        padding: 14px;
+        font-size: 15px;
+        min-height: 44px;
+        padding: 12px 16px;
     }
 }
 
-/* Dark mode support */
+/* Móviles estándar (376px - 480px) */
+@media (max-width: 480px) {
+    .container {
+        padding: 14px;
+    }
+
+    .header h1 {
+        font-size: 22px;
+    }
+
+    .timer-card .timer p {
+        font-size: 24px;
+    }
+
+    .btn {
+        font-size: 16px;
+        padding: 13px 18px;
+    }
+}
+
+/* Dark mode mejorado */
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg-color: #000000;
+        --bg-color: #0a0a0a; /* CAMBIADO de #000000 - menos OLED burn */
         --card-bg-color: #1c1c1e;
         --text-color: #ffffff;
-        --subtle-text-color: #8e8e93;
+        --subtle-text-color: #98989d; /* AJUSTADO - más legible */
         --gray-light: #48484a;
         --gray-dark: #636366;
+        /* NUEVO: Variables específicas dark mode */
+        --shadow-dark: rgba(0, 0, 0, 0.5);
+        --border-dark: rgba(255, 255, 255, 0.1);
     }
-    
+
+    body {
+        /* NUEVO: Textura sutil para evitar flat look */
+        background-image:
+            radial-gradient(circle at 20% 50%, rgba(0, 122, 255, 0.03) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(124, 58, 237, 0.03) 0%, transparent 50%);
+    }
+
+    .status-card, .timer-card, .log-card {
+        box-shadow: 0 4px 16px var(--shadow-dark);
+        border: 1px solid var(--border-dark);
+    }
+
     #log-container {
-        background-color: #2c2c2e;
+        background-color: #0a0a0a; /* CAMBIADO */
         color: var(--subtle-text-color);
+        border: 1px solid var(--border-dark);
     }
-    
+
+    .modal-overlay {
+        background: rgba(0, 0, 0, 0.85); /* AUMENTADO */
+    }
+
     .modal-content {
         background: var(--card-bg-color);
         color: var(--text-color);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8); /* AUMENTADO */
+        border: 1px solid var(--border-dark);
     }
-    
+
     .modal-content textarea {
         background: var(--bg-color);
         color: var(--text-color);
         border-color: var(--gray-light);
     }
+
+    /* NUEVO: Botones en dark mode con más contraste */
+    .btn {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4),
+                    0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .btn:hover {
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5),
+                    0 0 0 1px rgba(255, 255, 255, 0.1);
+    }
+
+    /* NUEVO: Status indicators más brillantes en dark */
+    .status-indicator.green {
+        background-color: #32d74b;
+        box-shadow: 0 0 8px rgba(50, 215, 75, 0.4);
+    }
+
+    .status-indicator.yellow {
+        background-color: #ffd60a;
+        box-shadow: 0 0 8px rgba(255, 214, 10, 0.4);
+    }
+
+    .status-indicator.red {
+        background-color: #ff453a;
+        box-shadow: 0 0 8px rgba(255, 69, 58, 0.4);
+    }
+
+    /* NUEVO: Info messages en dark mode */
+    .info-message.alert {
+        background: linear-gradient(135deg, #3d1a1a, #2d1212);
+        border-color: #ff453a;
+        color: #ff6961;
+    }
+
+    .info-message.success {
+        background: linear-gradient(135deg, #1a3d1a, #122d12);
+        border-color: #32d74b;
+        color: #5de66d;
+    }
+}
+
+/* NUEVO: Soporte para usuarios con sensibilidad al movimiento */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .btn:hover,
+    .btn:active {
+        transform: none !important;
+    }
+
+    .modal-overlay,
+    .modal-content,
+    .info-message {
+        animation: none !important;
+    }
+
+    .loading-overlay {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+
+    .spinner {
+        animation: none !important;
+        border: 4px solid var(--primary-blue);
+    }
+}
+
+/* NUEVO: Focus states consistentes y visibles */
+*:focus-visible {
+    outline: 3px solid var(--primary-blue);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+
+.btn:focus-visible {
+    outline: 3px solid rgba(0, 122, 255, 0.5);
+    outline-offset: 4px;
+}
+
+.account-btn:focus-visible {
+    outline: 3px solid rgba(0, 122, 255, 0.6);
+    outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid var(--primary-blue);
+    outline-offset: 2px;
+}
+
+.status-indicator:focus-visible {
+    outline: 3px solid var(--primary-blue);
+    outline-offset: 6px;
 }
