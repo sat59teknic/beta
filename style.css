@@ -850,3 +850,207 @@ textarea:focus-visible {
     outline: 3px solid var(--primary-blue);
     outline-offset: 6px;
 }
+
+/* ===== FASE 3: NICE-TO-HAVE ===== */
+
+/* 1. Animaciones de transición entre estados */
+.status-card h2 {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Animación cuando cambia el estado */
+@keyframes stateChange {
+    0% {
+        opacity: 0.7;
+        transform: scale(0.95);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.02);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.status-card[data-state-changed="true"] h2 {
+    animation: stateChange 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 2. Haptic feedback (vibración en móviles) */
+/* Implementado vía JavaScript en los botones */
+
+/* 3. Skeleton loaders para estados de carga */
+@keyframes skeleton-loading {
+    0% {
+        background-position: -200px 0;
+    }
+    100% {
+        background-position: calc(200px + 100%) 0;
+    }
+}
+
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--gray-light) 0%,
+        var(--gray-dark) 20%,
+        var(--gray-light) 40%,
+        var(--gray-light) 100%
+    );
+    background-size: 200px 100%;
+    animation: skeleton-loading 1.5s infinite;
+    border-radius: 8px;
+}
+
+.skeleton-text {
+    height: 16px;
+    margin-bottom: 8px;
+}
+
+.skeleton-title {
+    height: 32px;
+    width: 60%;
+}
+
+/* 4. Micro-interacciones en timers */
+.timer-card .timer p {
+    animation: timerPulse 1s infinite;
+}
+
+@keyframes timerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.95; }
+}
+
+.timer-card .timer p.timer-active {
+    animation: timerPulseActive 2s infinite;
+}
+
+@keyframes timerPulseActive {
+    0%, 100% {
+        opacity: 1;
+        text-shadow: 0 0 4px rgba(0, 122, 255, 0.3);
+    }
+    50% {
+        opacity: 0.92;
+        text-shadow: 0 0 8px rgba(0, 122, 255, 0.5);
+    }
+}
+
+/* 5. Easter egg en logo (triple-tap) */
+@keyframes logoSpin {
+    0% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.2); }
+    100% { transform: rotate(360deg) scale(1); }
+}
+
+.logo-text.easter-egg {
+    animation: logoSpin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* 6. Modo compacto para pantallas muy pequeñas */
+@media (max-height: 600px) and (orientation: landscape) {
+    .status-card,
+    .timer-card,
+    .log-card {
+        padding: 12px;
+        margin-bottom: 8px;
+    }
+
+    .status-card h2 {
+        font-size: 24px;
+    }
+
+    .timer-card .timer p {
+        font-size: 20px;
+    }
+
+    .log-card {
+        display: none; /* Ocultar logs en landscape muy compacto */
+    }
+
+    .btn {
+        min-height: 40px;
+        padding: 10px 16px;
+        font-size: 15px;
+    }
+
+    .header h1 {
+        font-size: 20px;
+    }
+
+    .nine-text, .t-text {
+        font-size: 24px;
+    }
+}
+
+/* 7. Indicador de batería baja */
+.battery-warning {
+    position: fixed;
+    top: max(env(safe-area-inset-top), 16px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #ff9500, #ff6b35);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(255, 149, 0, 0.4);
+    z-index: 9999;
+    animation: slideDown 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    display: none;
+}
+
+.battery-warning.show {
+    display: block;
+}
+
+.battery-warning::before {
+    content: '🔋';
+    margin-right: 8px;
+}
+
+/* Mejoras adicionales de pulido */
+.button-container .btn {
+    position: relative;
+}
+
+.button-container .btn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.2) 0%,
+        transparent 50%
+    );
+    opacity: 0;
+    transition: opacity 0.3s;
+    border-radius: inherit;
+}
+
+.button-container .btn:hover::after {
+    opacity: 1;
+}
+
+/* Animación de log entries */
+#log-container p {
+    animation: logEntryFade 0.3s ease-out;
+}
+
+@keyframes logEntryFade {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
