@@ -1,4 +1,4 @@
-const CACHE_NAME = 'beta10-v1';
+const CACHE_NAME = 'beta10-v2-no-emergency-button';
 const urlsToCache = [
     '/',
     '/index.html',
