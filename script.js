@@ -66,7 +66,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         isAlarmPlaying: false,
         pauseAlarmTriggered: false,
         lastAlarmTime: null, // 🔧 Para permitir alarmas recurrentes
+        alarmSource: null, // 🐛 FIX: Tracking de fuente de alarma ('local' o 'service-worker')
         wakeLock: null, // Para mantener pantalla activa
+        wakeLockLost: false, // 🐛 FIX: Flag para detectar si se perdió el wake lock
         // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
         workDayStandard: null, // 8 o 9 según el día
         workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
@@ -673,10 +675,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function endPause() {
         // Cancelar notificación programada
         cancelScheduledNotification();
-        
+
         // Liberar wake lock
         releaseWakeLock();
-        
+
         handleAction([
             { action: 'salida', point: 'P' },
             {
@@ -689,8 +691,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                         appState.currentPauseType = null;
                         appState.pauseAlarmTriggered = false;
                         appState.lastAlarmTime = null; // 🔧 Resetear tiempo de última alarma
+                        appState.alarmSource = null; // 🐛 FIX: Resetear fuente de alarma
+                        appState.wakeLockLost = false; // 🐛 FIX: Resetear flag de wake lock perdido
                         stopAlarm();
-                        
+
                         // Limpiar mensaje de pausa
                         dom.infoMessage.classList.remove('success');
                         dom.infoMessage.textContent = "";
@@ -765,12 +769,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             if ('wakeLock' in navigator) {
                 appState.wakeLock = await navigator.wakeLock.request('screen');
+                appState.wakeLockLost = false; // 🐛 FIX: Resetear flag
                 logActivity('🔆 Pantalla mantinguda activa durant la pausa');
-                
+
                 appState.wakeLock.addEventListener('release', () => {
                     logActivity('🔅 Wake lock alliberat');
+
+                    // 🐛 FIX #3: Detectar si se perdió durante una pausa activa
+                    if (appState.currentState === 'PAUSA' && !appState.wakeLockLost) {
+                        appState.wakeLockLost = true;
+                        logActivity('⚠️ Wake Lock perdido durante pausa - Intentando recuperar...');
+
+                        // Intentar recuperar wake lock después de 1 segundo
+                        setTimeout(async () => {
+                            if (appState.currentState === 'PAUSA') {
+                                const recovered = await requestWakeLock();
+                                if (recovered) {
+                                    logActivity('✅ Wake Lock recuperado');
+
+                                    // Cancelar y reprogramar notificación del Service Worker
+                                    if (appState.currentPauseStart && appState.currentPauseType) {
+                                        const elapsed = new Date() - appState.currentPauseStart;
+                                        const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
+                                        const remaining = pauseLimit - elapsed;
+
+                                        if (remaining > 0) {
+                                            await cancelScheduledNotification();
+                                            await scheduleNotification(appState.currentPauseType, remaining);
+                                            logActivity('🔔 Notificació reprogramada després de recuperar Wake Lock');
+                                        }
+                                    }
+                                } else {
+                                    logActivity('❌ No se pudo recuperar Wake Lock');
+                                }
+                            }
+                        }, 1000);
+                    }
                 });
-                
+
                 return true;
             }
         } catch (error) {
@@ -851,30 +887,53 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function playPauseAlarm(pauseType) {
+    function playPauseAlarm(pauseType, source = 'local') {
         const now = new Date();
         const timeSinceLastAlarm = appState.lastAlarmTime ? now - appState.lastAlarmTime : Infinity;
-        
+
+        // 🐛 FIX #1: Prevenir doble disparo desde diferentes fuentes
+        if (appState.isAlarmPlaying && appState.alarmSource) {
+            logActivity(`⚠️ Alarma ya activa (fuente: ${appState.alarmSource}), ignorando disparo desde ${source}`);
+            return;
+        }
+
         // 🔧 Permitir alarma si es la primera vez O han pasado al menos 2 minutos desde la última
         if (!appState.pauseAlarmTriggered || timeSinceLastAlarm > 2 * 60 * 1000) {
+            // 🐛 FIX #2: Marcar flags DENTRO del check, después de validar
             appState.pauseAlarmTriggered = true;
             appState.isAlarmPlaying = true;
             appState.lastAlarmTime = now;
-            
+            appState.alarmSource = source;
+
+            logActivity(`🔔 Alarma activada desde: ${source}`);
+
+            // 🐛 FIX #4: Si la alarma local se activa, cancelar timeout del Service Worker
+            if (source === 'local' || source === 'init') {
+                cancelScheduledNotification();
+                // Notificar al Service Worker para que cancele su timeout también
+                if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.ready.then(registration => {
+                        registration.active.postMessage({
+                            type: 'ALARM_ALREADY_TRIGGERED'
+                        });
+                    });
+                }
+            }
+
             // 🚨 ALARMA MEJORADA - MÁS PERSISTENTE
-            
+
             // 1. Vibración más fuerte y más larga
             if ('vibrate' in navigator) {
                 navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
             }
-            
+
             // 2. Sonido fuerte múltiple
             for (let i = 0; i < 3; i++) {
                 setTimeout(() => {
                     createBeepSound('strong');
                 }, i * 1000);
             }
-            
+
             // 3. Notificación del sistema inmediata
             if (Notification.permission === 'granted') {
                 const timeText = pauseType === 'esmorçar' ? '10 minutos' : '30 minutos';
@@ -887,13 +946,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                     silent: false
                 });
             }
-            
+
             // 4. Mostrar notificación visual persistente
             const timeText = pauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
             dom.infoMessage.textContent = `🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!`;
             dom.infoMessage.classList.remove('success');
             dom.infoMessage.classList.add('alert');
-            
+
             logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
 
             // 🚨 BUG FIX #1: Limpiar intervalo anterior ANTES de crear uno nuevo
@@ -915,11 +974,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     alarmIntervalGlobal = null;
                 }
             }, 30000); // Cada 30 segundos
+        } else {
+            logActivity(`⚠️ Alarma throttled: Solo ${Math.round(timeSinceLastAlarm/1000)}s desde última alarma`);
         }
     }
 
     function stopAlarm() {
         appState.isAlarmPlaying = false;
+        appState.alarmSource = null; // 🐛 FIX: Resetear fuente de alarma
 
         // 🚨 BUG FIX #1: Limpiar intervalo global de alarma
         if (alarmIntervalGlobal) {
@@ -1172,10 +1234,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await scheduleNotification(appState.currentPauseType, remaining);
                     logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {
-                    // Já ha passat el temps, activar alarma
-                    // 🚨 BUG FIX #6: Marcar isAlarmPlaying ANTES de llamar para evitar duplicación
-                    appState.isAlarmPlaying = true;
-                    playPauseAlarm(appState.currentPauseType);
+                    // Ya ha pasado el tiempo, activar alarma
+                    // 🐛 FIX: NO marcar isAlarmPlaying aquí - playPauseAlarm() lo hace internamente
+                    playPauseAlarm(appState.currentPauseType, 'init');
                 }
             }
         }
@@ -1224,7 +1285,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     navigator.serviceWorker.addEventListener('message', event => {
                         if (event.data && event.data.type === 'PAUSE_ALARM') {
                             logActivity('🔔 Alarma activada pel Service Worker');
-                            playPauseAlarm(event.data.pauseType);
+                            // 🐛 FIX #4: Pasar 'service-worker' como fuente
+                            playPauseAlarm(event.data.pauseType, 'service-worker');
                         }
                     });
                 })

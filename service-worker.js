@@ -80,15 +80,21 @@ self.addEventListener('activate', event => {
 // 🔔 NUEVO: Manejar mensajes para programar notificaciones
 self.addEventListener('message', event => {
     console.log('📨 Service Worker: Mensaje recibido', event.data);
-    
+
     if (event.data && event.data.type === 'SCHEDULE_NOTIFICATION') {
         scheduleNotification(event.data.pauseType, event.data.delayMs, event.data.timeLimit);
     }
-    
+
     if (event.data && event.data.type === 'CANCEL_NOTIFICATION') {
         cancelNotification();
     }
-    
+
+    // 🐛 FIX #4: Cancelar alarma del SW si la app principal ya la activó
+    if (event.data && event.data.type === 'ALARM_ALREADY_TRIGGERED') {
+        console.log('🔕 Alarma ya activada localmente, cancelando timeout del SW');
+        cancelNotification();
+    }
+
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting();
     }
