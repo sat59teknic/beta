@@ -5,7 +5,8 @@
   "main": "api/beta10.js",
   "scripts": {
     "build": "echo 'Build completed'",
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "encrypt-creds": "node scripts/encrypt-credentials.js"
   },
   "engines": {
     "node": "22.x"

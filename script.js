@@ -10,19 +10,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
     console.log('🔐 Verificant autenticació...');
     
+    let hasServerAuth = false;
+    let serverAuthSource = null;
+
     // Probar conectividad con el backend primero (SIN errorManager)
     try {
         const healthResponse = await fetch('/api/health');
         const healthData = await healthResponse.json();
         console.log('✅ Backend connectat:', healthData.message);
+        if (healthData.hasServerCredentials) {
+            hasServerAuth = true;
+            serverAuthSource = healthData.credentialsSource;
+            console.log('🛡️ Credencials segures detectades al servidor (origen:', serverAuthSource, ')');
+        }
     } catch (error) {
         console.error('❌ Error de connectivitat backend:', error);
         showTranslatedError(error);
         return;
     }
     
-    if (!authManager.hasValidCredentials()) {
-        console.log('🔐 No hi ha credencials. Mostrant login...');
+    if (!hasServerAuth && !authManager.hasValidCredentials()) {
+        console.log('🔐 No hi ha credencials al servidor ni locals. Mostrant login...');
         try {
             await authManager.showLoginScreen();
             console.log('✅ Usuari autenticat correctament');
@@ -32,7 +40,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
     } else {
-        console.log('✅ Credencials trobades. Usuari ja autenticat.');
+        if (hasServerAuth) {
+            console.log('✅ Autenticació del servidor llesta (credencials xifrades).');
+        } else {
+            console.log('✅ Credencials trobades a local. Usuari ja autenticat.');
+        }
     }
 
     // Añadir botón de cuenta al header
@@ -440,9 +452,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw error;
         }
         
-        // 🔐 OBTENER CREDENCIALES DEL USUARIO ACTUAL
+        // 🔐 OBTENER CREDENCIALES DEL USUARIO (LOCAL O SERVIDOR)
         const credentials = authManager.getCredentials();
-        if (!credentials) {
+        if (!credentials && !hasServerAuth) {
             const error = new Error('Has de fer login primer.');
             showTranslatedError(error);
             throw error;
@@ -461,8 +473,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     point: point,
                     location: appState.currentLocation,
                     observations: observations,
-                    // 🔐 ENVIAR CREDENCIALES DINÁMICAS
-                    credentials: credentials
+                    // 🔐 ENVIAR CREDENCIALES DINÁMICAS (OPCIONAL SI EL SERVIDOR YA LAS TIENE)
+                    credentials: credentials || null
                 })
             });
 
@@ -477,7 +489,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const duration = Math.round(performance.now() - startTime);
             dom.connectionStatus.className = 'status-indicator green';
             const obsText = observations ? ` - Obs: ${observations.substring(0, 30)}...` : '';
-            const userText = credentials.username ? ` [${credentials.username}]` : '';
+            const activeUser = credentials?.username || result.user || 'servidor';
+            const userText = ` [${activeUser}]`;
             logActivity(`✅ Beta10 OK (${duration}ms): ${action} con punto '${point}' registrado${obsText}${userText}`);
             
             return result;
