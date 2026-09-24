@@ -86,11 +86,13 @@ class ErrorManager {
         }
         
         if (lowerError.includes('timeout') || 
-            lowerError.includes('timed out')) {
+            lowerError.includes('timed out') ||
+            lowerError.includes('aborted') ||
+            lowerError.includes('operation was aborted')) {
             return {
-                message: 'La connexió ha trigat massa temps. Comprova la xarxa.',
+                message: 'La connexió ha trigat massa temps o s\'ha cancel·lat. Comprova la xarxa i reintenta.',
                 type: 'network',
-                action: 'Prova amb millor senyal de xarxa'
+                action: 'Prova de nou o verifica la connexió amb el servidor'
             };
         }
         

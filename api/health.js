@@ -20,13 +20,13 @@ module.exports = async function handler(req, res) {
         let hostStatus = null;
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4000);
-            const response = await fetch('https://9teknic.movbeta10.es:9000/app/index.html', {
-                method: 'HEAD',
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const response = await fetch('https://9teknic.movbeta10.es:9000/token/', {
+                method: 'GET',
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
-            hostReachable = response.ok || response.status === 302 || response.status === 200;
+            hostReachable = response.status === 405 || response.ok || response.status === 200;
             hostStatus = response.status;
         } catch (e) {
             hostReachable = false;
