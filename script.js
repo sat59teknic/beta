@@ -7,6 +7,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- FIN DE LA CONFIGURACIÓN ---
     //
 
+    // 🎯 ELEMENTS DEL DOM (declarats al principi per evitar ReferenceError)
+    const dom = {
+        connectionStatus: document.getElementById('connection-status'),
+        gpsStatus: document.getElementById('gps-status'),
+        currentStateText: document.getElementById('current-state-text'),
+        workTimer: document.getElementById('work-timer'),
+        pauseTimer: document.getElementById('pause-timer'),
+        buttonContainer: document.getElementById('button-container'),
+        logContainer: document.getElementById('log-container'),
+        loadingOverlay: document.getElementById('loading-overlay'),
+        loadingText: document.getElementById('loading-text'),
+        infoMessage: document.getElementById('info-message'),
+    };
+
     // 🔐 VERIFICAR AUTENTICACIÓN AL INICIO
     console.log('🔐 Verificant autenticació...');
     
@@ -16,9 +30,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (isNativeApp) {
         console.log('📱 Mode App Nativa Android detectat (connexió directa)');
-        dom.connectionStatus.className = 'status-indicator green';
+        if (dom.connectionStatus) dom.connectionStatus.className = 'status-indicator green';
     } else {
-        // Probar conectividad con el backend primero (SIN errorManager)
+        // Probar conectividad con el backend primero en entorno web
         try {
             const healthResponse = await fetch('/api/health');
             const healthData = await healthResponse.json();
@@ -28,10 +42,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 serverAuthSource = healthData.credentialsSource;
                 console.log('🛡️ Credencials segures detectades al servidor (origen:', serverAuthSource, ')');
             }
+            if (dom.connectionStatus) dom.connectionStatus.className = 'status-indicator green';
         } catch (error) {
-            console.error('❌ Error de connectivitat backend:', error);
-            showTranslatedError(error);
-            return;
+            console.warn('⚠️ No s\'ha pogut connectar amb el backend (mode offline o error de xarxa):', error);
+            if (dom.connectionStatus) dom.connectionStatus.className = 'status-indicator red';
         }
     }
     
@@ -59,19 +73,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const PAUSE_LIMITS = {
         esmorçar: 10 * 60 * 1000, // 10 minutos
         dinar: 30 * 60 * 1000     // 30 minutos
-    };
-
-    const dom = {
-        connectionStatus: document.getElementById('connection-status'),
-        gpsStatus: document.getElementById('gps-status'),
-        currentStateText: document.getElementById('current-state-text'),
-        workTimer: document.getElementById('work-timer'),
-        pauseTimer: document.getElementById('pause-timer'),
-        buttonContainer: document.getElementById('button-container'),
-        logContainer: document.getElementById('log-container'),
-        loadingOverlay: document.getElementById('loading-overlay'),
-        loadingText: document.getElementById('loading-text'),
-        infoMessage: document.getElementById('info-message'),
     };
 
     let appState = {

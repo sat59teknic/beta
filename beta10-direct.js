@@ -8,9 +8,14 @@ const Beta10Direct = (() => {
     let pointCache = {};
 
     function isNative() {
-        return typeof window.Capacitor !== 'undefined' && 
-               typeof window.Capacitor.isNativePlatform === 'function' && 
-               window.Capacitor.isNativePlatform();
+        if (typeof window.Capacitor !== 'undefined' && typeof window.Capacitor.isNativePlatform === 'function') {
+            if (window.Capacitor.isNativePlatform()) return true;
+        }
+        const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isNativeProtocol = window.location.protocol === 'capacitor:' || window.location.protocol === 'file:';
+        const isCapacitorWebview = navigator.userAgent.includes('wv') || navigator.userAgent.includes('Capacitor');
+
+        return isNativeProtocol || (isLocalHost && (!window.location.port || window.location.port === '80' || window.location.port === '443')) || isCapacitorWebview;
     }
 
     async function getOrRefreshToken(credentials, forceRefresh = false) {

@@ -43,6 +43,7 @@ jobs:
         run: |
           npx cap add android
           node scripts/prepare-android.js
+          node scripts/generate-icons.js
           npx cap sync android
 
       - name: 🔨 Compilar APK amb Gradle (Debug)
