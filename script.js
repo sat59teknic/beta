@@ -772,7 +772,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Solicitar permisos de notificación
     async function requestNotificationPermission() {
-        if ('Notification' in window && 'serviceWorker' in navigator) {
+        if (!isNativeApp && 'Notification' in window && 'serviceWorker' in navigator) {
             try {
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
@@ -857,7 +857,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Programar notificación usando Service Worker
     async function scheduleNotification(pauseType, delayMs) {
         try {
-            if ('serviceWorker' in navigator) {
+            if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
                 const timeLimit = pauseType === 'esmorçar' ? 10 : 30;
                 
@@ -879,7 +879,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cancelar notificación programada
     async function cancelScheduledNotification() {
         try {
-            if ('serviceWorker' in navigator) {
+            if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
                 registration.active.postMessage({
                     type: 'CANCEL_NOTIFICATION'
@@ -937,7 +937,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (source === 'local' || source === 'init') {
                 cancelScheduledNotification();
                 // Notificar al Service Worker para que cancele su timeout también
-                if ('serviceWorker' in navigator) {
+                if (!isNativeApp && 'serviceWorker' in navigator) {
                     navigator.serviceWorker.ready.then(registration => {
                         registration.active.postMessage({
                             type: 'ALARM_ALREADY_TRIGGERED'
@@ -1301,8 +1301,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             showLoading(false);
         });
         
-        // Registrar el Service Worker para PWA
-        if ('serviceWorker' in navigator) {
+        // Registrar el Service Worker para PWA (solo en web, no en APK nativa)
+        if (!isNativeApp && 'serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js')
                 .then(reg => {
                     logActivity('✅ Service Worker registrat amb èxit.');
@@ -1317,6 +1317,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     });
                 })
                 .catch(err => logActivity(`❌ Error en registrar Service Worker: ${err}`));
+        } else if (isNativeApp) {
+            logActivity('📱 Mode APK Nativa: Recursos integrats localment');
         }
         
         // Detectar quan l'app perd/guanya focus
