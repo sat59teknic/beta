@@ -42,7 +42,30 @@ module.exports = async function handler(req, res) {
 
             socket.on('timeout', () => {
                 socket.destroy();
-                resolve({ ok: false, durationMs: Date.now() - start, error: 'TIMEOUT (8s): El tallafocs / router de Beta10 no respon als paquets de Vercel' });
+                resolve({ ok: false, durationMs: Date.now() - start, error: 'TIMEOUT (8s): Port 9000 no respon' });
+            });
+
+            socket.on('error', (err) => {
+                socket.destroy();
+                resolve({ ok: false, durationMs: Date.now() - start, error: err.message, code: err.code });
+            });
+        });
+
+        // 2b. Prova port 9001
+        report.tcp9001 = await new Promise((resolve) => {
+            const socket = new net.Socket();
+            const start = Date.now();
+            socket.setTimeout(8000);
+
+            socket.connect(9001, report.dns.address, () => {
+                const durationMs = Date.now() - start;
+                socket.destroy();
+                resolve({ ok: true, durationMs, message: 'Port 9001 obert i accessible des de Vercel' });
+            });
+
+            socket.on('timeout', () => {
+                socket.destroy();
+                resolve({ ok: false, durationMs: Date.now() - start, error: 'TIMEOUT (8s): Port 9001 no respon' });
             });
 
             socket.on('error', (err) => {
