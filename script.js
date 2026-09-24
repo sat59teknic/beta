@@ -12,21 +12,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     let hasServerAuth = false;
     let serverAuthSource = null;
+    const isNativeApp = typeof Beta10Direct !== 'undefined' && Beta10Direct.isNative();
 
-    // Probar conectividad con el backend primero (SIN errorManager)
-    try {
-        const healthResponse = await fetch('/api/health');
-        const healthData = await healthResponse.json();
-        console.log('✅ Backend connectat:', healthData.message);
-        if (healthData.hasServerCredentials) {
-            hasServerAuth = true;
-            serverAuthSource = healthData.credentialsSource;
-            console.log('🛡️ Credencials segures detectades al servidor (origen:', serverAuthSource, ')');
+    if (isNativeApp) {
+        console.log('📱 Mode App Nativa Android detectat (connexió directa)');
+        dom.connectionStatus.className = 'status-indicator green';
+    } else {
+        // Probar conectividad con el backend primero (SIN errorManager)
+        try {
+            const healthResponse = await fetch('/api/health');
+            const healthData = await healthResponse.json();
+            console.log('✅ Backend connectat:', healthData.message);
+            if (healthData.hasServerCredentials) {
+                hasServerAuth = true;
+                serverAuthSource = healthData.credentialsSource;
+                console.log('🛡️ Credencials segures detectades al servidor (origen:', serverAuthSource, ')');
+            }
+        } catch (error) {
+            console.error('❌ Error de connectivitat backend:', error);
+            showTranslatedError(error);
+            return;
         }
-    } catch (error) {
-        console.error('❌ Error de connectivitat backend:', error);
-        showTranslatedError(error);
-        return;
     }
     
     if (!hasServerAuth && !authManager.hasValidCredentials()) {
@@ -465,25 +471,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         dom.connectionStatus.className = 'status-indicator yellow';
         
         try {
-            const response = await fetch(PROXY_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: action,
-                    point: point,
-                    location: appState.currentLocation,
-                    observations: observations,
-                    // 🔐 ENVIAR CREDENCIALES DINÁMICAS (OPCIONAL SI EL SERVIDOR YA LAS TIENE)
-                    credentials: credentials || null
-                })
-            });
+            let result;
+            if (typeof Beta10Direct !== 'undefined' && Beta10Direct.isNative()) {
+                console.log(`[App Nativa] Executant fitxatge directe a Beta10...`);
+                result = await Beta10Direct.executeFichaje(action, point, appState.currentLocation, observations, credentials);
+            } else {
+                const response = await fetch(PROXY_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: action,
+                        point: point,
+                        location: appState.currentLocation,
+                        observations: observations,
+                        // 🔐 ENVIAR CREDENCIALES DINÁMICAS (OPCIONAL SI EL SERVIDOR YA LAS TIENE)
+                        credentials: credentials || null
+                    })
+                });
 
-            const result = await response.json();
+                result = await response.json();
 
-            if (!response.ok || !result.success) {
-                const error = new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
-                showTranslatedError(error);
-                throw error;
+                if (!response.ok || !result.success) {
+                    const error = new Error(result.error || `Error en el servidor (HTTP ${response.status})`);
+                    showTranslatedError(error);
+                    throw error;
+                }
             }
             
             const duration = Math.round(performance.now() - startTime);

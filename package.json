@@ -4,9 +4,16 @@
   "description": "Control de jornada Beta10 - Vercel + Browserless (Ultra-rápido)",
   "main": "api/beta10.js",
   "scripts": {
-    "build": "echo 'Build completed'",
+    "build": "node scripts/build-www.js",
     "dev": "vercel dev",
     "encrypt-creds": "node scripts/encrypt-credentials.js"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/android": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
   },
   "engines": {
     "node": "22.x"

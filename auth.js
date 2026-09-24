@@ -210,8 +210,12 @@ class AuthManager {
         });
     }
 
-    // Probar credenciales con el servidor
+    // Probar credenciales con el servidor (o directo en app nativa)
     async testCredentials(username, password) {
+        if (typeof Beta10Direct !== 'undefined' && Beta10Direct.isNative()) {
+            return await Beta10Direct.testAuth(username, password);
+        }
+
         try {
             const response = await fetch('/api/test-auth', {
                 method: 'POST',
