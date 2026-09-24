@@ -33,6 +33,14 @@ module.exports = async function handler(req, res) {
             hostStatus = e.message;
         }
         
+        let port9000Test = null;
+        try {
+            const pRes = await fetch('http://portquiz.net:9000/', { signal: AbortSignal.timeout(3000) });
+            port9000Test = pRes.ok ? 'OK' : `HTTP ${pRes.status}`;
+        } catch (pe) {
+            port9000Test = pe.message;
+        }
+        
         return res.status(200).json({
             success: true,
             message: 'Backend Beta10 operatiu',
@@ -41,6 +49,7 @@ module.exports = async function handler(req, res) {
             targetHost: 'https://9teknic.movbeta10.es:9000',
             hostReachable: hostReachable,
             hostStatus: hostStatus,
+            port9000Test: port9000Test,
             hasServerCredentials: !!serverCreds,
             credentialsSource: serverCreds ? serverCreds.source : null,
             status: 'healthy'
