@@ -1102,3 +1102,136 @@ textarea:focus-visible {
         transform: translateX(0);
     }
 }
+
+/* 🆕 Parelles de botons d'acció (habitual + observacions) */
+.btn-pair {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 340px) {
+    .btn-pair {
+        grid-template-columns: 1fr;
+    }
+}
+
+.btn-start-obs {
+    background: linear-gradient(135deg, #1e7e34, #155724);
+    font-size: 14.5px;
+    padding: 12px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-secondary-obs {
+    background: linear-gradient(135deg, #4338ca, #312e81);
+    font-size: 14.5px;
+    padding: 12px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-stop-obs {
+    background: linear-gradient(135deg, #bd2130, #721c24);
+    font-size: 14.5px;
+    padding: 12px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* 🆕 Targeta d'Hores Extra integrada al modal */
+.overtime-card {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 2px solid #f59e0b;
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 14px;
+    color: #92400e;
+    text-align: center;
+}
+
+.overtime-header {
+    margin-bottom: 10px;
+}
+
+.overtime-badge {
+    background: #f59e0b;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    display: inline-block;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
+}
+
+.overtime-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    text-align: center;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 10px 4px;
+    border-radius: 10px;
+}
+
+.overtime-item .ot-label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #78350f;
+    margin-bottom: 2px;
+}
+
+.overtime-item .ot-value {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.overtime-item.highlight .ot-value.extra {
+    color: #b45309;
+    font-size: 15px;
+}
+
+.overtime-note {
+    font-size: 12px;
+    margin: 0;
+    color: #78350f;
+    line-height: 1.4;
+}
+
+.modal-subtitle {
+    font-size: 13px;
+    color: var(--subtle-text-color);
+    margin: -5px 0 14px 0;
+    text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+    .overtime-card {
+        background: linear-gradient(135deg, #2d2006 0%, #1f1604 100%);
+        border-color: #d97706;
+        color: #fde68a;
+    }
+    .overtime-grid {
+        background: rgba(0, 0, 0, 0.45);
+    }
+    .overtime-item .ot-label {
+        color: #fbbf24;
+    }
+    .overtime-item .ot-value {
+        color: #f3f4f6;
+    }
+    .overtime-item.highlight .ot-value.extra {
+        color: #fbbf24;
+    }
+    .overtime-note {
+        color: #fde68a;
+    }
+}
+

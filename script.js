@@ -71,8 +71,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     addAccountButton();
 
     const PAUSE_LIMITS = {
-        esmorçar: 10 * 60 * 1000, // 10 minutos
-        dinar: 30 * 60 * 1000     // 30 minutos
+        esmorçar: 15 * 60 * 1000, // 15 minutos (desayuno)
+        dinar: 30 * 60 * 1000     // 30 minutos (comida)
     };
 
     let appState = {
@@ -285,68 +285,136 @@ document.addEventListener('DOMContentLoaded', async () => {
             modal.innerHTML = `
                 <div class="modal-content">
                     <h3>Tipus de Pausa</h3>
-                    <p>Selecciona el tipus de pausa que vols iniciar:</p>
+                    <p class="modal-subtitle">Selecciona el tipus de pausa que vols iniciar:</p>
                     <div class="pause-type-buttons">
-                        <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('esmorçar')">
-                            🥐 Esmorçar
-                            <small>10 minuts</small>
+                        <button class="btn btn-secondary pause-type-btn" id="btn-pause-esmorzar">
+                            🥐 Esmorzar
+                            <small>15 minuts (avís d'alarma en acabar)</small>
                         </button>
-                        <button class="btn btn-secondary pause-type-btn" onclick="selectPauseType('dinar')">
+                        <button class="btn btn-secondary pause-type-btn" id="btn-pause-dinar">
                             🍽️ Dinar
-                            <small>30 minuts</small>
+                            <small>30 minuts (avís d'alarma en acabar)</small>
                         </button>
                     </div>
                     <div class="modal-buttons">
-                        <button class="btn btn-secondary" onclick="cancelPauseType()">Cancel·lar</button>
+                        <button class="btn btn-secondary" id="btn-pause-cancel">Cancel·lar</button>
                     </div>
                 </div>
             `;
             document.body.appendChild(modal);
-            
-            window.selectPauseType = (type) => {
-                document.body.removeChild(modal);
-                resolve(type);
-                delete window.selectPauseType;
-                delete window.cancelPauseType;
+
+            const cleanup = () => {
+                if (document.body.contains(modal)) {
+                    document.body.removeChild(modal);
+                }
             };
-            
-            window.cancelPauseType = () => {
-                document.body.removeChild(modal);
+
+            document.getElementById('btn-pause-esmorzar').onclick = () => {
+                cleanup();
+                resolve('esmorçar');
+            };
+
+            document.getElementById('btn-pause-dinar').onclick = () => {
+                cleanup();
+                resolve('dinar');
+            };
+
+            document.getElementById('btn-pause-cancel').onclick = () => {
+                cleanup();
                 resolve(null);
-                delete window.selectPauseType;
-                delete window.cancelPauseType;
             };
         });
     }
 
-    // Función para mostrar modal de observaciones
-    function showObservationsModal(extraText = '') {
+    // 🆕 Modal versàtil d'observacions i pantalla d'hores extra
+    function showObservationsModal({
+        title = 'Observacions',
+        subtitle = '',
+        placeholder = 'Introdueix comentari o observacions...',
+        isOvertime = false,
+        overtimeDetails = null,
+        defaultValue = '',
+        required = false,
+        confirmText = 'Confirmar',
+        cancelText = 'Cancel·lar'
+    } = {}) {
         return new Promise((resolve) => {
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
-            const placeholder = extraText ? `${extraText} Client (ex: +30min Joan Molina)` : "Introdueix observacions";
+
+            let overtimeHtml = '';
+            if (isOvertime && overtimeDetails) {
+                overtimeHtml = `
+                    <div class="overtime-card">
+                        <div class="overtime-header">
+                            <span class="overtime-badge">💰 HORES EXTRA DETECTADES</span>
+                        </div>
+                        <div class="overtime-grid">
+                            <div class="overtime-item">
+                                <span class="ot-label">Total Treballat</span>
+                                <span class="ot-value">${overtimeDetails.totalHoursFormatted}</span>
+                            </div>
+                            <div class="overtime-item">
+                                <span class="ot-label">Estàndard</span>
+                                <span class="ot-value">${overtimeDetails.standardFormatted}</span>
+                            </div>
+                            <div class="overtime-item highlight">
+                                <span class="ot-label">Hores Extra</span>
+                                <span class="ot-value extra">${overtimeDetails.extraText}</span>
+                            </div>
+                        </div>
+                        <p class="overtime-note">Has superat la jornada habitual en més de 30 minuts. Si us plau, especifica el motiu o client a les observacions.</p>
+                    </div>
+                `;
+            }
+
             modal.innerHTML = `
                 <div class="modal-content">
-                    <h3>Observacions</h3>
-                    <textarea id="observations-input" placeholder="${placeholder}" maxlength="200"></textarea>
+                    <h3>${title}</h3>
+                    ${subtitle ? `<p class="modal-subtitle">${subtitle}</p>` : ''}
+                    ${overtimeHtml}
+                    <textarea id="observations-input" placeholder="${placeholder}" maxlength="250">${defaultValue}</textarea>
                     <div class="modal-buttons">
-                        <button class="btn btn-secondary" onclick="closeModal(false)">Cancel·lar</button>
-                        <button class="btn btn-start" onclick="closeModal(true)">Confirmar</button>
+                        <button type="button" class="btn btn-secondary" id="modal-cancel-btn">${cancelText}</button>
+                        <button type="button" class="btn btn-start" id="modal-confirm-btn">${confirmText}</button>
                     </div>
                 </div>
             `;
             document.body.appendChild(modal);
-            
-            // Enfocar en el textarea
+
+            const input = document.getElementById('observations-input');
+            const cancelBtn = document.getElementById('modal-cancel-btn');
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+
             setTimeout(() => {
-                document.getElementById('observations-input').focus();
-            }, 100);
-            
-            window.closeModal = (confirmed) => {
-                const observations = confirmed ? document.getElementById('observations-input').value : '';
-                document.body.removeChild(modal);
-                resolve(observations);
-                delete window.closeModal;
+                if (input) {
+                    input.focus();
+                    if (defaultValue) {
+                        input.setSelectionRange(defaultValue.length, defaultValue.length);
+                    }
+                }
+            }, 120);
+
+            const cleanup = () => {
+                if (document.body.contains(modal)) {
+                    document.body.removeChild(modal);
+                }
+            };
+
+            cancelBtn.onclick = () => {
+                cleanup();
+                resolve(null);
+            };
+
+            confirmBtn.onclick = () => {
+                const text = input ? input.value.trim() : '';
+                if (required && !text) {
+                    alert('Has d\'indicar observacions obligatòriament.');
+                    if (input) input.focus();
+                    return;
+                }
+                cleanup();
+                resolve(text);
             };
         });
     }
@@ -522,74 +590,71 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- FUNCIONES DE TRANSICIÓN DE ESTADO ---
 
-    async function handleAction(actions) {
+    async function handleAction(actions, defaultObservations = '') {
         try {
             await getCurrentLocation();
             
-            // Si es finalizar jornada y hay horas extra, pedir observaciones
-            let observations = '';
+            let observations = defaultObservations || '';
             const isEndingWorkday = actions.some(a => a.newState === 'FUERA');
-            if (isEndingWorkday) {
+
+            // Si es finalitzar jornada i no s'han passat observacions prèviament, comprovar hores extra (>30 min)
+            if (isEndingWorkday && !defaultObservations) {
                 const extraInfo = calculateExtraHours();
                 const standardWorkDay = extraInfo.standardWorkDay;
-                const dayType = appState.workDayType || 'Desconegut';
-                
-                // 🔍 DEBUG: Mostrar información de tiempo en el log
+                const dayType = appState.workDayType || getDayTypeName(new Date());
                 const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
                 const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
-                logActivity(`⏰ Jornada total: ${totalHoursFormatted} (estàndard ${dayType}: ${standardFormatted})`);
-                
-                // 🆕 LÓGICA CORREGIDA PARA TODOS LOS DÍAS
+
+                let extraText = '';
+                let hasOvertime = false;
+
                 if (standardWorkDay === 0) {
-                    // Sábado/Domingo: TODO es hora extra si >= 30 minutos
                     if (extraInfo.totalHours >= 0.5) {
+                        hasOvertime = true;
                         const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                        let extraText = '';
-                        if (totalBlocks === 1) {
-                            extraText = '+30min';
-                        } else if (totalBlocks === 2) {
-                            extraText = '+1h';
-                        } else {
-                            const hours = Math.floor(totalBlocks / 2);
-                            const mins = (totalBlocks % 2) * 30;
-                            if (mins === 0) {
-                                extraText = `+${hours}h`;
-                            } else {
-                                extraText = `+${hours}h${mins}min`;
-                            }
-                        }
-                        logActivity(`💰 ${dayType}: ${extraText} d'hores extra (tot és extra)`);
-                        alert(`💰 ${dayType}: ${extraText} d'hores extra detectades.\n\nHas d'afegir observacions obligatòriament.`);
-                        observations = await showObservationsModal(extraText);
-                    } else {
-                        // Menos de 30 minutos en sábado/domingo
-                        const extraMinutes = Math.round(extraInfo.totalHours * 60);
-                        logActivity(`ℹ️ ${dayType}: ${extraMinutes} minuts treballats (menys de 30min, no cal observacions)`);
+                        const hours = Math.floor(totalBlocks / 2);
+                        const mins = (totalBlocks % 2) * 30;
+                        extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
                     }
                 } else if (extraInfo.extraHours >= 0.5) {
-                    // Lunes-Jueves (9h) o Viernes (8h) con horas extra >= 30min
+                    hasOvertime = true;
                     const extraBlocks = extraInfo.extraBlocks;
-                    let extraText = '';
-                    if (extraBlocks === 1) {
-                        extraText = '+30min';
-                    } else if (extraBlocks === 2) {
-                        extraText = '+1h';
-                    } else {
-                        const hours = Math.floor(extraBlocks / 2);
-                        const mins = (extraBlocks % 2) * 30;
-                        if (mins === 0) {
-                            extraText = `+${hours}h`;
-                        } else {
-                            extraText = `+${hours}h${mins}min`;
+                    const hours = Math.floor(extraBlocks / 2);
+                    const mins = (extraBlocks % 2) * 30;
+                    extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
+                }
+
+                // Si hi ha hores extra detectades (>30 minuts), obrir la pantalla d'hores extra
+                if (hasOvertime) {
+                    const isMandatory = standardWorkDay === 0;
+                    logActivity(`💰 ${dayType}: Detectades ${extraText} d'hores extra`);
+
+                    const obsResult = await showObservationsModal({
+                        title: `💰 Hores Extra Detectades (${extraText})`,
+                        subtitle: `Has superat la jornada estàndard de ${standardFormatted}.`,
+                        isOvertime: true,
+                        overtimeDetails: {
+                            totalHoursFormatted,
+                            standardFormatted,
+                            dayType,
+                            extraText
+                        },
+                        placeholder: `Ex: ${extraText} Feina allargada per incidència client XYZ...`,
+                        defaultValue: `${extraText} `,
+                        required: isMandatory,
+                        confirmText: 'Confirmar i Finalitzar',
+                        cancelText: isMandatory ? 'Cancel·lar' : 'Finalitzar sense comentari'
+                    });
+
+                    if (obsResult === null) {
+                        if (isMandatory) {
+                            logActivity('⚠️ Finalització cancel·lada (observacions obligatòries)');
+                            return;
                         }
-                    }
-                    logActivity(`💰 Detectades ${extraText} d'hores extra (estàndard ${dayType}: ${standardFormatted})`);
-                    const shouldAddObs = confirm(`Detectades ${extraText} d'hores extra. Vols afegir observacions?`);
-                    if (shouldAddObs) {
-                        observations = await showObservationsModal(extraText);
+                    } else {
+                        observations = obsResult;
                     }
                 } else if (extraInfo.totalHours > standardWorkDay) {
-                    // Tiempo extra pero menos de 30 minutos
                     const extraMinutes = Math.round((extraInfo.totalHours - standardWorkDay) * 60);
                     logActivity(`ℹ️ Jornada amb ${extraMinutes} minuts extra (menys de 30min, no es considera hora extra)`);
                 } else {
@@ -597,8 +662,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             
-            for (const { action, point, newState, onComplete } of actions) {
-                await sendToProxy(action, point, observations);
+            for (const { action, point, newState, onComplete, observations: actionObs } of actions) {
+                const finalObs = actionObs || observations;
+                await sendToProxy(action, point, finalObs);
                 if (newState) appState.currentState = newState;
                 if (onComplete) onComplete();
                 saveState();
@@ -611,85 +677,119 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
 
-    function startWorkday() {
+    async function startWorkday(withObs = false) {
+        let obs = '';
+        if (withObs) {
+            obs = await showObservationsModal({
+                title: '💬 Comentari d\'Inici de Jornada',
+                subtitle: 'Afegeix una observació o comentari per a l\'entrada:',
+                placeholder: 'Ex: Inici a obra client XYZ, guàrdia, etc.',
+                confirmText: '▶️ Iniciar Jornada',
+                cancelText: 'Cancel·lar'
+            });
+            if (obs === null) return; // Usuari ha cancel·lat
+        }
+
         handleAction([
             {
-                action: 'entrada', point: 'J', newState: 'JORNADA',
+                action: 'entrada', point: 'J', newState: 'JORNADA', observations: obs,
                 onComplete: () => { 
                     const now = new Date();
                     appState.workStartTime = now;
-                    // 🆕 ESTABLECER HORARIO DINÁMICO
                     appState.workStartDay = now.getDay();
                     appState.workDayStandard = getStandardWorkDay(now);
                     appState.workDayType = getDayTypeName(now);
-                    logActivity(`📅 Jornada iniciada: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)`);
+                    const obsInfo = obs ? ` [Obs: ${obs}]` : '';
+                    logActivity(`📅 Jornada iniciada: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)${obsInfo}`);
                 }
             }
-        ]);
+        ], obs);
     }
     
-    function startAlmacen() {
+    async function startAlmacen(withObs = false) {
+        let obs = '';
+        if (withObs) {
+            obs = await showObservationsModal({
+                title: '💬 Comentari d\'Inici a 9teknic',
+                subtitle: 'Afegeix una observació o comentari per a 9teknic:',
+                placeholder: 'Ex: Preparació de comandes, càrrega de vehicle...',
+                confirmText: '📦 Iniciar 9teknic',
+                cancelText: 'Cancel·lar'
+            });
+            if (obs === null) return; // Usuari ha cancel·lat
+        }
+
         handleAction([
             {
-                action: 'entrada', point: '9', newState: 'ALMACEN',
+                action: 'entrada', point: '9', newState: 'ALMACEN', observations: obs,
                 onComplete: () => { 
                     const now = new Date();
                     appState.workStartTime = now;
-                    // 🆕 ESTABLECER HORARIO DINÁMICO
                     appState.workStartDay = now.getDay();
                     appState.workDayStandard = getStandardWorkDay(now);
                     appState.workDayType = getDayTypeName(now);
-                    logActivity(`📅 Magatzem iniciat: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)`);
+                    const obsInfo = obs ? ` [Obs: ${obs}]` : '';
+                    logActivity(`📅 9teknic iniciat: ${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)} estàndard)${obsInfo}`);
                 }
             }
-        ]);
+        ], obs);
     }
 
-    function endAlmacenAndStartWorkday() {
+    async function endAlmacenAndStartWorkday(withObs = false) {
+        let obs = '';
+        if (withObs) {
+            obs = await showObservationsModal({
+                title: '💬 Transició Magatzem → Jornada',
+                subtitle: 'Afegeix una observació per al canvi:',
+                placeholder: 'Ex: Sortida de magatzem cap a client XYZ...',
+                confirmText: 'Confirmar Canvi',
+                cancelText: 'Cancel·lar'
+            });
+            if (obs === null) return;
+        }
+
         handleAction([
-            { action: 'salida', point: '9' },
-            { action: 'entrada', point: 'J', newState: 'JORNADA' }
-        ]);
+            { action: 'salida', point: '9', observations: obs },
+            { action: 'entrada', point: 'J', newState: 'JORNADA', observations: obs }
+        ], obs);
     }
 
-    // Función modificada para iniciar pausa con selección de tipo
+    // Funció modificada per iniciar pausa (Esmorzar 15 min / Dinar 30 min)
     async function startPause() {
         try {
             const pauseType = await showPauseTypeModal();
-            if (!pauseType) return; // Usuario canceló
+            if (!pauseType) return; // Usuari cancel·la
             
             await getCurrentLocation();
             
-            // Primer fichaje: Salida de jornada
+            // Primer fitxatge: Sortida de jornada
             await sendToProxy('salida', 'J', '');
             
-            // Segundo fichaje: Entrada a pausa con observaciones del tipo
+            // Segon fitxatge: Entrada a pausa amb observacions del tipus
             await sendToProxy('entrada', 'P', pauseType);
             
-            // Actualizar estado
+            // Actualitzar estat
             appState.currentState = 'PAUSA';
             appState.currentPauseStart = new Date();
             appState.currentPauseType = pauseType;
             appState.pauseAlarmTriggered = false;
             
-            // 🔥 NUEVAS FUNCIONALIDADES PARA GARANTIZAR ALARMAS
-            
-            // 1. Mantener pantalla activa durante pausa
+            // 1. Mantenir pantalla activa durant la pausa
             await requestWakeLock();
             
-            // 2. Programar notificación del sistema
+            // 2. Programar notificació del sistema
             const pauseLimit = PAUSE_LIMITS[pauseType];
             await scheduleNotification(pauseType, pauseLimit);
             
-            // 3. Mostrar instruccions a l'usuari
-            const timeText = pauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
+            // 3. Mostrar instruccions a l'usuari (15 min o 30 min)
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
             dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantingues l'app oberta.`;
             dom.infoMessage.classList.add('success');
             
             saveState();
             updateUI();
             
-            logActivity(`🍽️ Pausa iniciada: ${pauseType} (${pauseType === 'esmorçar' ? '10min' : '30min'})`);
+            logActivity(`🍽️ Pausa iniciada: ${pauseType} (${timeText})`);
             logActivity(`🔔 Alarma programada per ${timeText} - NO tanquis l'app`);
             
         } catch (error) {
@@ -730,20 +830,68 @@ document.addEventListener('DOMContentLoaded', async () => {
         ]);
     }
 
-    function endWorkday() {
+    async function endWorkday(withObs = false) {
+        let customObservations = '';
+
+        if (withObs) {
+            const extraInfo = calculateExtraHours();
+            const standardWorkDay = extraInfo.standardWorkDay;
+            const dayType = appState.workDayType || getDayTypeName(new Date());
+            const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
+            const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
+
+            let extraText = '';
+            let hasOvertime = false;
+            if (standardWorkDay === 0) {
+                if (extraInfo.totalHours >= 0.5) {
+                    hasOvertime = true;
+                    const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+                    const hours = Math.floor(totalBlocks / 2);
+                    const mins = (totalBlocks % 2) * 30;
+                    extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
+                }
+            } else if (extraInfo.extraHours >= 0.5) {
+                hasOvertime = true;
+                const extraBlocks = extraInfo.extraBlocks;
+                const hours = Math.floor(extraBlocks / 2);
+                const mins = (extraBlocks % 2) * 30;
+                extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
+            }
+
+            const obsResult = await showObservationsModal({
+                title: hasOvertime ? `💰 Hores Extra (${extraText}) + Comentari` : '💬 Observacions de Sortida',
+                subtitle: hasOvertime 
+                    ? `Has superat la jornada habitual en més de 30 minuts.` 
+                    : `Finalització de jornada (${totalHoursFormatted} totals).`,
+                isOvertime: hasOvertime,
+                overtimeDetails: hasOvertime ? {
+                    totalHoursFormatted,
+                    standardFormatted,
+                    dayType,
+                    extraText
+                } : null,
+                placeholder: hasOvertime 
+                    ? `Ex: ${extraText} Feina allargada per incidència client XYZ...` 
+                    : 'Introdueix observacions de sortida...',
+                defaultValue: hasOvertime ? `${extraText} ` : '',
+                confirmText: '⛔ Finalitzar Jornada',
+                cancelText: 'Cancel·lar'
+            });
+
+            if (obsResult === null) return; // Cancel·lat per l'usuari
+            customObservations = obsResult;
+        }
+
         const actions = [];
         
         // Secuencia correcta según el estado actual
         if (appState.currentState === 'PAUSA') {
-            // Si estamos en pausa, primero salir de pausa y luego de jornada
             actions.push({ action: 'salida', point: 'P' });
             actions.push({ action: 'entrada', point: 'J' });
             actions.push({ action: 'salida', point: 'J' });
         } else if (appState.currentState === 'ALMACEN') {
-            // Si estamos en almacén, salir directamente
             actions.push({ action: 'salida', point: '9' });
         } else if (appState.currentState === 'JORNADA') {
-            // Si estamos en jornada, salir directamente
             actions.push({ action: 'salida', point: 'J' });
         }
        
@@ -751,13 +899,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (actions.length > 0) {
             actions[actions.length - 1].newState = 'FUERA';
             actions[actions.length - 1].onComplete = () => {
-                // Reset para el día siguiente
                 appState.workStartTime = null;
                 appState.currentPauseStart = null;
                 appState.currentPauseType = null;
                 appState.totalPauseTimeToday = 0;
                 appState.pauseAlarmTriggered = false;
-                // 🆕 LIMPIAR HORARIO DINÁMICO
                 appState.workDayStandard = null;
                 appState.workDayType = null;
                 appState.workStartDay = null;
@@ -765,7 +911,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             };
         }
 
-        handleAction(actions);
+        handleAction(actions, customObservations);
     }
 
     // --- SISTEMA DE NOTIFICACIONES Y WAKE LOCK ---
@@ -962,7 +1108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // 3. Notificación del sistema inmediata
             if (Notification.permission === 'granted') {
-                const timeText = pauseType === 'esmorçar' ? '10 minutos' : '30 minutos';
+                const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
                 new Notification('⏰ Temps de pausa completat!', {
                     body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
                     icon: '/icon-192.svg',
@@ -974,7 +1120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             // 4. Mostrar notificación visual persistente
-            const timeText = pauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
             dom.infoMessage.textContent = `🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!`;
             dom.infoMessage.classList.remove('success');
             dom.infoMessage.classList.add('alert');
@@ -1066,60 +1212,87 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     function generateDynamicButtons() {
-        // 🚨 BUG FIX #4: VALIDAR estado antes de limpiar botones
         if (!appState.currentState ||
             !['FUERA', 'JORNADA', 'PAUSA', 'ALMACEN'].includes(appState.currentState)) {
             logActivity(`⚠️ generateDynamicButtons: Estado inválido "${appState.currentState}" - NO limpiar botones`);
-            return; // No borrar botones si el estado es inválido
+            return;
         }
 
         dom.buttonContainer.innerHTML = ''; // Limpiar botones
 
         const createButton = (text, className, action, disabled = false) => {
             const btn = document.createElement('button');
-            btn.textContent = text;
+            btn.innerHTML = text;
             btn.className = `btn ${className}`;
             btn.onclick = action;
             btn.disabled = disabled;
-            dom.buttonContainer.appendChild(btn);
+            return btn;
+        };
+
+        const createPair = (btn1, btn2) => {
+            const row = document.createElement('div');
+            row.className = 'btn-pair';
+            row.appendChild(btn1);
+            row.appendChild(btn2);
+            dom.buttonContainer.appendChild(row);
         };
 
         switch (appState.currentState) {
             case 'FUERA':
-                createButton('▶️ Iniciar Jornada (J)', 'btn-start', startWorkday);
-                createButton('📦 Iniciar Magatzem (9)', 'btn-secondary', startAlmacen);
-                break;
-            case 'ALMACEN':
-                 createButton('▶️ Sortir Magatzem i Iniciar Jornada (9 → J)', 'btn-start', endAlmacenAndStartWorkday);
-                 createButton('⛔ Finalitzar Jornada', 'btn-stop', endWorkday);
-                break;
-            case 'JORNADA':
-                createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause);
-                createButton('⛔ Finalitzar Jornada (J)', 'btn-stop', endWorkday);
-                break;
-            case 'PAUSA':
-                // Mostrar tipo de pausa actual
-                const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
-                
-                // Botón para salir de pausa - siempre habilitado
-                createButton(
-                    `▶️ Tornar de Pausa${pauseTypeText}`, 
-                    'btn-start', 
-                    endPause, 
-                    false // Siempre habilitado
+                // 2 botons d'iniciar jornada (habitual i amb comentari)
+                createPair(
+                    createButton('▶️ Iniciar Jornada', 'btn-start', () => startWorkday(false)),
+                    createButton('💬 Jornada + Obs', 'btn-start-obs', () => startWorkday(true))
                 );
+                // 2 botons d'iniciar 9teknic / magatzem (habitual i amb comentari)
+                createPair(
+                    createButton('📦 Iniciar 9teknic', 'btn-secondary', () => startAlmacen(false)),
+                    createButton('💬 9teknic + Obs', 'btn-secondary-obs', () => startAlmacen(true))
+                );
+                break;
+
+            case 'ALMACEN':
+                // 2 botons per sortir de magatzem i passar a jornada
+                createPair(
+                    createButton('▶️ Sortir a Jornada', 'btn-start', () => endAlmacenAndStartWorkday(false)),
+                    createButton('💬 Canvi + Obs', 'btn-start-obs', () => endAlmacenAndStartWorkday(true))
+                );
+                // 2 botons per finalitzar jornada des de magatzem
+                createPair(
+                    createButton('⛔ Finalitzar', 'btn-stop', () => endWorkday(false)),
+                    createButton('💬 Finalitzar + Obs', 'btn-stop-obs', () => endWorkday(true))
+                );
+                break;
+
+            case 'JORNADA':
+                // Botó de Pausa
+                dom.buttonContainer.appendChild(
+                    createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause)
+                );
+                // 2 botons per finalitzar jornada (habitual i amb comentari)
+                createPair(
+                    createButton('⛔ Finalitzar Jornada', 'btn-stop', () => endWorkday(false)),
+                    createButton('💬 Finalitzar + Obs', 'btn-stop-obs', () => endWorkday(true))
+                );
+                break;
+
+            case 'PAUSA':
+                const pauseTypeText = appState.currentPauseType === 'esmorçar' ? ' (15 min)' : (appState.currentPauseType === 'dinar' ? ' (30 min)' : '');
                 
-                // Limpiar mensaje si no hay alarma
-                if(!appState.isAlarmPlaying) {
+                dom.buttonContainer.appendChild(
+                    createButton(`▶️ Tornar de Pausa${pauseTypeText}`, 'btn-start', endPause, false)
+                );
+
+                if (!appState.isAlarmPlaying) {
                    dom.infoMessage.classList.remove('alert');
                    dom.infoMessage.textContent = "";
                 }
-                
-                // Botón Finalizar Jornada DESHABILITADO en pausa para evitar confusión
-                createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
-                    alert('Has de sortir de la pausa abans de finalitzar la jornada.');
-                }, true);
-                
+
+                dom.buttonContainer.appendChild(
+                    createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
+                        alert('Has de tornar de la pausa abans de finalitzar la jornada.');
+                    }, true)
+                );
                 break;
         }
     }
@@ -1130,7 +1303,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 🚨 BUG FIX #3: VALIDAR currentState antes de usar
         if (!appState.currentState ||
             !['FUERA', 'JORNADA', 'PAUSA', 'ALMACEN'].includes(appState.currentState)) {
-            // Estado inválido detectado - resetear a FUERA
             logActivity(`⚠️ Estado inválido detectado: "${appState.currentState}" - Resetejant a FUERA`);
             appState.currentState = 'FUERA';
             appState.workStartTime = null;
@@ -1141,7 +1313,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             saveState();
         }
 
-        // 🆕 INCLUIR TIPO DE DÍA EN EL ESTADO
         const dayInfo = appState.workDayType ? ` - ${appState.workDayType}` : '';
         const standardInfo = appState.workDayStandard !== null ? ` (${getStandardWorkDayFormatted(appState.workDayStandard)})` : '';
 
@@ -1153,19 +1324,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                 stateText = `En Jornada${dayInfo}${standardInfo}`;
                 break;
             case 'PAUSA':
-                const pauseTypeText = appState.currentPauseType ? ` (${appState.currentPauseType})` : '';
+                const pauseTypeText = appState.currentPauseType === 'esmorçar' ? ' (15 min)' : (appState.currentPauseType === 'dinar' ? ' (30 min)' : '');
                 stateText = `En Pausa${pauseTypeText}${dayInfo}`;
                 break;
             case 'ALMACEN':
-                stateText = `En Magatzem${dayInfo}${standardInfo}`;
+                stateText = `En 9teknic${dayInfo}${standardInfo}`;
                 break;
             default:
-                // Fallback adicional (no debería llegar aquí)
                 logActivity(`❌ Estado desconocido en switch: "${appState.currentState}"`);
                 stateText = 'Error de Estado';
         }
 
         dom.currentStateText.textContent = stateText;
+
+        const pauseLabelElem = document.getElementById('pause-timer-label');
+        if (pauseLabelElem) {
+            if (appState.currentState === 'PAUSA') {
+                pauseLabelElem.textContent = appState.currentPauseType === 'esmorçar' ? 'Pausa (15m)' : 'Pausa (30m)';
+            } else {
+                pauseLabelElem.textContent = 'Pausa';
+            }
+        }
+
         generateDynamicButtons();
     }
     
