@@ -783,14 +783,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             // 3. Mostrar instruccions a l'usuari (15 min o 30 min)
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada. Alarma en ${timeText}. Mantingues l'app oberta.`;
+            if (isNativeApp) {
+                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonarà en segon pla o pantalla apagada.`;
+            } else {
+                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). Mantingues el navegador obert.`;
+            }
             dom.infoMessage.classList.add('success');
             
             saveState();
             updateUI();
             
             logActivity(`🍽️ Pausa iniciada: ${pauseType} (${timeText})`);
-            logActivity(`🔔 Alarma programada per ${timeText} - NO tanquis l'app`);
+            logActivity(`🔔 Alarma nativa programada per a ${timeText} (activa amb pantalla bloquejada)`);
             
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
@@ -916,9 +920,76 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- SISTEMA DE NOTIFICACIONES Y WAKE LOCK ---
     
-    // Solicitar permisos de notificación
+    // Canal de notificacions per a Android amb màxima prioritat (so, vibració i heads-up)
+    async function initNativeNotificationChannel() {
+        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                const { LocalNotifications } = window.Capacitor.Plugins;
+                await LocalNotifications.createChannel({
+                    id: 'pause_alarm_channel',
+                    name: 'Alarmes de Pausa',
+                    description: 'Notificacions i alarmes de finalització de pausa de jornada laboral',
+                    importance: 5, // MAX: sona, vibra i apareix a pantalla bloquejada / heads-up
+                    visibility: 1, // Visible a la pantalla de bloqueig
+                    vibration: true,
+                    lights: true,
+                    lightColor: '#E74C3C'
+                });
+                console.log('✅ Canal de notificacions nativa d\'alta prioritat preparat');
+            } catch (err) {
+                console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
+            }
+        }
+    }
+
+    // Configurar listeners d'esdeveniments per a notificacions natives
+    function setupNativeNotificationListeners() {
+        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                const { LocalNotifications } = window.Capacitor.Plugins;
+                
+                // Quan la notificació es dispara mentre l'app està oberta o en segon pla
+                LocalNotifications.addListener('localNotificationReceived', (notification) => {
+                    logActivity(`🔔 Notificació d'alarma rebuda: ${notification.title}`);
+                    if (appState.currentState === 'PAUSA') {
+                        playPauseAlarm(appState.currentPauseType || 'pausa', 'native-notification');
+                    }
+                });
+
+                // Quan l'usuari toca la notificació des de la barra d'Android o pantalla de bloqueig
+                LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+                    logActivity('👆 Notificació d\'alarma oberta per l\'usuari');
+                    if (appState.currentState === 'PAUSA') {
+                        playPauseAlarm(appState.currentPauseType || 'pausa', 'notification-click');
+                    }
+                });
+                
+                console.log('✅ Listeners de notificacions natives configurats');
+            } catch (err) {
+                console.warn('⚠️ Error configurant listeners de notificació nativa:', err);
+            }
+        }
+    }
+
+    // Solicitar permisos de notificación (Android nativo o Web)
     async function requestNotificationPermission() {
-        if (!isNativeApp && 'Notification' in window && 'serviceWorker' in navigator) {
+        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+            try {
+                const { LocalNotifications } = window.Capacitor.Plugins;
+                const status = await LocalNotifications.requestPermissions();
+                if (status.display === 'granted') {
+                    logActivity('✅ Permisos de notificació nativa concedits');
+                    await initNativeNotificationChannel();
+                    return true;
+                } else {
+                    logActivity('⚠️ Permisos de notificació nativa no concedits');
+                    return false;
+                }
+            } catch (error) {
+                logActivity(`❌ Error permisos notificació nativa: ${error.message}`);
+                return false;
+            }
+        } else if (!isNativeApp && 'Notification' in window && 'serviceWorker' in navigator) {
             try {
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
@@ -936,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
     
-    // Wake Lock para mantener pantalla activa durante pausa
+    // Wake Lock para mantener pantalla activa durante pausa si la pantalla está encendida
     async function requestWakeLock() {
         try {
             if ('wakeLock' in navigator) {
@@ -950,29 +1021,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // 🐛 FIX #3: Detectar si se perdió durante una pausa activa
                     if (appState.currentState === 'PAUSA' && !appState.wakeLockLost) {
                         appState.wakeLockLost = true;
-                        logActivity('⚠️ Wake Lock perdido durante pausa - Intentando recuperar...');
+                        logActivity('⚠️ Wake Lock alliberat - L\'alarma nativa en segon pla segueix programada');
 
-                        // Intentar recuperar wake lock después de 1 segundo
+                        // Intentar recuperar wake lock después de 1 segundo si sigue en primer plano
                         setTimeout(async () => {
                             if (appState.currentState === 'PAUSA') {
                                 const recovered = await requestWakeLock();
                                 if (recovered) {
-                                    logActivity('✅ Wake Lock recuperado');
-
-                                    // Cancelar y reprogramar notificación del Service Worker
-                                    if (appState.currentPauseStart && appState.currentPauseType) {
-                                        const elapsed = new Date() - appState.currentPauseStart;
-                                        const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
-                                        const remaining = pauseLimit - elapsed;
-
-                                        if (remaining > 0) {
-                                            await cancelScheduledNotification();
-                                            await scheduleNotification(appState.currentPauseType, remaining);
-                                            logActivity('🔔 Notificació reprogramada després de recuperar Wake Lock');
-                                        }
-                                    }
-                                } else {
-                                    logActivity('❌ No se pudo recuperar Wake Lock');
+                                    logActivity('✅ Wake Lock recuperat');
                                 }
                             }
                         }, 1000);
@@ -1000,12 +1056,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    // Programar notificación usando Service Worker
+    // Programar notificación con AlarmManager nativo (segundo plano real) o Service Worker
     async function scheduleNotification(pauseType, delayMs) {
+        const timeLimit = pauseType === 'esmorçar' ? 15 : 30;
+        const targetDate = new Date(Date.now() + delayMs);
+        
         try {
-            if (!isNativeApp && 'serviceWorker' in navigator) {
+            if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+                const { LocalNotifications } = window.Capacitor.Plugins;
+                
+                // Cancelar alarma nativa previa
+                try {
+                    await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+                } catch (e) {}
+
+                // Programar con allowWhileIdle: true (activa alarma de Android aunque el móvil esté en reposo/bloqueado)
+                await LocalNotifications.schedule({
+                    notifications: [
+                        {
+                            id: 1001,
+                            title: '⏰ Temps de pausa completat!',
+                            body: `Has completat els ${timeLimit} minuts de ${pauseType}. Torna a la jornada laboral!`,
+                            schedule: {
+                                at: targetDate,
+                                allowWhileIdle: true
+                            },
+                            channelId: 'pause_alarm_channel',
+                            smallIcon: 'ic_launcher_round',
+                            iconColor: '#E74C3C',
+                            sound: undefined,
+                            actionTypeId: '',
+                            extra: {
+                                pauseType: pauseType
+                            }
+                        }
+                    ]
+                });
+                
+                const timeString = targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                logActivity(`🔔 Alarma nativa programada a les ${timeString} (${timeLimit} min) - Funcionarà en segon pla`);
+            } else if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
-                const timeLimit = pauseType === 'esmorçar' ? 10 : 30;
                 
                 // Enviar mensaje al service worker para programar notificación
                 registration.active.postMessage({
@@ -1025,7 +1116,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cancelar notificación programada
     async function cancelScheduledNotification() {
         try {
-            if (!isNativeApp && 'serviceWorker' in navigator) {
+            if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+                const { LocalNotifications } = window.Capacitor.Plugins;
+                await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+                logActivity('🔕 Alarma nativa en segon pla cancel·lada');
+            } else if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
                 registration.active.postMessage({
                     type: 'CANCEL_NOTIFICATION'
@@ -1416,15 +1511,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             logActivity('✅ Estat de l\'app validat i corregit automàticament');
         }
         
-        // 🔔 SOLICITAR PERMISOS IMPORTANTES AL INICIO
+        // 🔔 SOLICITAR PERMISOS I CONFIGURAR NOTIFICACIONS AL INICI
         
         // 1. Permisos de notificación
         await requestNotificationPermission();
+
+        // 2. Configurar listeners de notificacions natives (recepció i clic)
+        setupNativeNotificationListeners();
         
-        // 2. Mostrar instrucción importante si está en pausa
+        // 3. Mostrar instrucció important si està en pausa
         if (appState.currentState === 'PAUSA' && appState.currentPauseType) {
-            const timeText = appState.currentPauseType === 'esmorçar' ? '10 minuts' : '30 minuts';
-            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma en ${timeText}. NO tanquis l'app.`;
+            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma programada a ${timeText}.`;
             dom.infoMessage.classList.add('success');
             
             // Volver a activar wake lock si está en pausa
@@ -1441,7 +1539,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {
                     // Ya ha pasado el tiempo, activar alarma
-                    // 🐛 FIX: NO marcar isAlarmPlaying aquí - playPauseAlarm() lo hace internamente
                     playPauseAlarm(appState.currentPauseType, 'init');
                 }
             }
@@ -1498,18 +1595,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                 })
                 .catch(err => logActivity(`❌ Error en registrar Service Worker: ${err}`));
         } else if (isNativeApp) {
-            logActivity('📱 Mode APK Nativa: Recursos integrats localment');
+            logActivity('📱 Mode APK Nativa: Alarmes natives en segon pla (AlarmManager) activades');
         }
         
         // Detectar quan l'app perd/guanya focus
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                logActivity('⚠️ App en background - Les alarmes poden no funcionar');
-                if (appState.currentState === 'PAUSA') {
-                    logActivity('🚨 IMPORTANT: Mantingues l\'app oberta per rebre alarmes');
+                if (isNativeApp) {
+                    logActivity('📱 App en segon pla: L\'alarma nativa sonarà exactament a la seva hora');
+                } else {
+                    logActivity('⚠️ Web en segon pla: Mantingues el navegador obert');
                 }
             } else {
-                logActivity('✅ App en foreground - Alarmes funcionen correctament');
+                logActivity('📱 App en primer pla');
+                // Comprovar si el temps de pausa ha vençut mentre l'app estava en segon pla
+                if (appState.currentState === 'PAUSA' && appState.currentPauseStart && appState.currentPauseType) {
+                    const elapsed = new Date() - appState.currentPauseStart;
+                    const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
+                    if (elapsed >= pauseLimit) {
+                        playPauseAlarm(appState.currentPauseType, 'foreground-return');
+                    }
+                }
+                updateTimers();
             }
         });
         
