@@ -1,4 +1,4 @@
-const CACHE_NAME = 'beta10-v3-sqlite-overtime';
+const CACHE_NAME = 'beta10-v4-alarm-sound';
 const urlsToCache = [
     '/',
     '/index.html',
@@ -8,6 +8,8 @@ const urlsToCache = [
     '/db-ui.js',
     '/sql-wasm.js',
     '/sql-wasm.wasm',
+    '/alarm.wav',
+    '/silence.wav',
     '/manifest.json'
 ];
 
@@ -154,8 +156,10 @@ function showNotification(pauseType, timeLimit) {
         badge: '/icon-192.svg',
         tag: 'pause-alarm',
         requireInteraction: true,
+        renotify: true,
         silent: false,
-        vibrate: [1000, 300, 1000, 300, 1000],
+        sound: '/alarm.wav',
+        vibrate: [800, 200, 800, 200, 800, 200, 1200, 300, 1200],
         actions: [
             {
                 action: 'return-to-work',

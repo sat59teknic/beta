@@ -811,16 +811,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 1. Mantenir pantalla activa durant la pausa
             await requestWakeLock();
             
-            // 2. Programar notificació del sistema
+            // 2. Iniciar àudio keep-alive en segon pla (permet que l'alarma soni amb pantalla bloquejada)
+            startBackgroundAudioKeepAlive(pauseType);
+
+            // 3. Programar notificació del sistema
             const pauseLimit = PAUSE_LIMITS[pauseType];
             await scheduleNotification(pauseType, pauseLimit);
             
-            // 3. Mostrar instruccions a l'usuari (15 min o 30 min)
+            // 4. Mostrar instruccions a l'usuari (15 min o 30 min)
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
             if (isNativeApp) {
                 dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonarà en segon pla o pantalla apagada.`;
             } else {
-                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). Mantingues el navegador obert.`;
+                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonora sonarà automàticament.`;
             }
             dom.infoMessage.classList.add('success');
             
@@ -828,7 +831,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateUI();
             
             logActivity(`🍽️ Pausa iniciada: ${pauseType} (${timeText})`);
-            logActivity(`🔔 Alarma nativa programada per a ${timeText} (activa amb pantalla bloquejada)`);
+            logActivity(`🔔 Alarma programada per a ${timeText} (activa amb pantalla bloquejada)`);
             
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
@@ -837,6 +840,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function endPause() {
+        // Aturar àudio d'alarma o keep-alive
+        stopAlarmAudio();
+
         // Cancelar notificación programada
         cancelScheduledNotification();
 
@@ -1007,24 +1013,108 @@ document.addEventListener('DOMContentLoaded', async () => {
         handleAction(actions, customObservations);
     }
 
-    // --- SISTEMA DE NOTIFICACIONES Y WAKE LOCK ---
-    
-    // Canal de notificacions per a Android amb màxima prioritat (so, vibració i heads-up)
+    // --- SISTEMA DE NOTIFICACIONES, ALARMA Y WAKE LOCK ---
+    const NATIVE_ALARM_CHANNEL_ID = 'pause_alarm_channel_v3';
+    let backgroundAlarmTimer = null;
+
+    function getAudioPlayer() {
+        return document.getElementById('pause-audio-player');
+    }
+
+    // Iniciar reproducció silenciosa (Keep-Alive) durant la pausa
+    // Això manté actiu el procés web d'Android/iOS evitant que el navegador suspengui l'àudio quan s'apaga la pantalla
+    function startBackgroundAudioKeepAlive(pauseType) {
+        try {
+            const player = getAudioPlayer();
+            if (player) {
+                player.src = 'silence.wav';
+                player.loop = true;
+                player.volume = 0.01;
+                player.play().then(() => {
+                    logActivity('🔈 Keep-Alive d\'àudio iniciat per a la pausa');
+                }).catch(e => {
+                    console.warn('⚠️ No s\'ha pogut iniciar àudio keep-alive:', e);
+                });
+            }
+        } catch (e) {
+            console.warn('⚠️ Error en startBackgroundAudioKeepAlive:', e);
+        }
+
+        if (backgroundAlarmTimer) {
+            clearTimeout(backgroundAlarmTimer);
+            backgroundAlarmTimer = null;
+        }
+        const pauseLimit = PAUSE_LIMITS[pauseType];
+        if (pauseLimit) {
+            backgroundAlarmTimer = setTimeout(() => {
+                if (appState.currentState === 'PAUSA') {
+                    logActivity(`⏰ Temporitzador de pausa finalitzat (${pauseType})`);
+                    playPauseAlarm(pauseType, 'background-timer');
+                }
+            }, pauseLimit);
+        }
+    }
+
+    // Reproduir el so d'alarma fort en bucle a través de l'element d'àudio
+    function playAlarmAudio(pauseType) {
+        try {
+            const player = getAudioPlayer();
+            if (player) {
+                player.src = 'alarm.wav';
+                player.loop = true;
+                player.volume = 1.0;
+                player.play().then(() => {
+                    logActivity('🔊 So d\'alarma fort activat');
+                }).catch(e => {
+                    console.warn('⚠️ Error reproduint alarm.wav:', e);
+                    createBeepSound('strong');
+                });
+            }
+        } catch (e) {
+            console.warn('⚠️ Error en playAlarmAudio:', e);
+        }
+    }
+
+    // Aturar qualsevol àudio d'alarma i temporitzador
+    function stopAlarmAudio() {
+        if (backgroundAlarmTimer) {
+            clearTimeout(backgroundAlarmTimer);
+            backgroundAlarmTimer = null;
+        }
+        try {
+            const player = getAudioPlayer();
+            if (player) {
+                player.pause();
+                player.removeAttribute('src');
+                player.load();
+            }
+        } catch (e) {
+            console.warn('⚠️ Error aturant àudio:', e);
+        }
+    }
+
+    // Canal de notificacions per a Android amb màxima prioritat i so propi d'alarma
     async function initNativeNotificationChannel() {
         if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
             try {
                 const { LocalNotifications } = window.Capacitor.Plugins;
+                try {
+                    await LocalNotifications.deleteChannel({ id: 'pause_alarm_channel' });
+                    await LocalNotifications.deleteChannel({ id: 'pause_alarm_channel_v2' });
+                } catch (e) {}
+
                 await LocalNotifications.createChannel({
-                    id: 'pause_alarm_channel',
+                    id: NATIVE_ALARM_CHANNEL_ID,
                     name: 'Alarmes de Pausa',
-                    description: 'Notificacions i alarmes de finalització de pausa de jornada laboral',
+                    description: 'Notificacions i alarma sonora de finalització de pausa laboral',
                     importance: 5, // MAX: sona, vibra i apareix a pantalla bloquejada / heads-up
                     visibility: 1, // Visible a la pantalla de bloqueig
+                    sound: 'alarm.wav',
                     vibration: true,
                     lights: true,
                     lightColor: '#E74C3C'
                 });
-                console.log('✅ Canal de notificacions nativa d\'alta prioritat preparat');
+                console.log('✅ Canal de notificacions nativa d\'alta prioritat amb so d\'alarma preparat');
             } catch (err) {
                 console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
             }
@@ -1170,10 +1260,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 at: targetDate,
                                 allowWhileIdle: true
                             },
-                            channelId: 'pause_alarm_channel',
+                            channelId: NATIVE_ALARM_CHANNEL_ID,
                             smallIcon: 'ic_launcher_round',
                             iconColor: '#E74C3C',
-                            sound: undefined,
+                            sound: 'alarm.wav',
                             actionTypeId: '',
                             extra: {
                                 pauseType: pauseType
@@ -1283,7 +1373,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
             }
 
-            // 2. Sonido fuerte múltiple
+            // 2. So d'alarma d'alta intensitat (fitxer alarm.wav a través d'HTML5 Audio)
+            playAlarmAudio(pauseType);
+
+            // Beeps auxiliars de suport
             for (let i = 0; i < 3; i++) {
                 setTimeout(() => {
                     createBeepSound('strong');
@@ -1320,6 +1413,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 5. Repetir alarma cada 30 segundos hasta que vuelva
             alarmIntervalGlobal = setInterval(() => {
                 if (appState.currentState === 'PAUSA' && appState.isAlarmPlaying) {
+                    playAlarmAudio(pauseType);
                     createBeepSound('strong');
                     if ('vibrate' in navigator) {
                         navigator.vibrate([500, 200, 500]);
@@ -1336,6 +1430,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function stopAlarm() {
+        stopAlarmAudio();
         appState.isAlarmPlaying = false;
         appState.alarmSource = null; // 🐛 FIX: Resetear fuente de alarma
 
@@ -1732,6 +1827,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const remaining = pauseLimit - elapsed;
                 
                 if (remaining > 0) {
+                    startBackgroundAudioKeepAlive(appState.currentPauseType);
                     await scheduleNotification(appState.currentPauseType, remaining);
                     logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {

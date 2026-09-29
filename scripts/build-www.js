@@ -21,7 +21,9 @@ const filesToCopy = [
     'db.js',
     'db-ui.js',
     'sql-wasm.js',
-    'sql-wasm.wasm'
+    'sql-wasm.wasm',
+    'alarm.wav',
+    'silence.wav'
 ];
 
 if (!fs.existsSync(destDir)) {
