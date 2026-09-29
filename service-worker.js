@@ -1,4 +1,4 @@
-const CACHE_NAME = 'beta10-v4-alarm-sound';
+const CACHE_NAME = 'beta10-v5-design-refresh';
 const urlsToCache = [
     '/',
     '/index.html',

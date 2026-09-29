@@ -1728,12 +1728,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         dom.currentStateText.textContent = stateText;
 
+        const statusCard = document.getElementById('status-card');
+        const liveBadge = document.getElementById('status-live-badge');
+        const liveText = liveBadge ? liveBadge.querySelector('.status-live-text') : null;
+        const workBox = document.getElementById('work-timer-box');
+        const pauseBox = document.getElementById('pause-timer-box');
+
+        if (statusCard) {
+            statusCard.className = `status-card state-${appState.currentState.toLowerCase()}`;
+        }
+        document.body.setAttribute('data-app-state', appState.currentState);
+
+        if (liveText) {
+            liveText.textContent = appState.currentState === 'FUERA' ? 'INACTIU' : 'ACTIU';
+        }
+
+        if (workBox && pauseBox) {
+            workBox.classList.toggle('timer-active', appState.currentState === 'JORNADA' || appState.currentState === 'ALMACEN');
+            pauseBox.classList.toggle('timer-active', appState.currentState === 'PAUSA');
+        }
+
         const pauseLabelElem = document.getElementById('pause-timer-label');
         if (pauseLabelElem) {
             if (appState.currentState === 'PAUSA') {
-                pauseLabelElem.textContent = appState.currentPauseType === 'esmorçar' ? 'Pausa (15m)' : 'Pausa (30m)';
+                pauseLabelElem.textContent = appState.currentPauseType === 'esmorçar' ? '☕ Pausa (15m)' : '🍽️ Pausa (30m)';
             } else {
-                pauseLabelElem.textContent = 'Pausa';
+                pauseLabelElem.textContent = '☕ Pausa';
             }
         }
 

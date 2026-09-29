@@ -14,6 +14,11 @@
     <link rel="icon" href="icon-192.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.json">
 
+    <!-- Typography: Plus Jakarta Sans & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="auth.css">
     <script src="sql-wasm.js"></script>
@@ -38,27 +43,31 @@
         </header>
 
         <main class="main-content">
-            <div class="status-card">
-                <p>Estat Actual</p>
+            <div class="status-card" id="status-card">
+                <div class="status-card-header">
+                    <span class="status-card-label">Estat Actual</span>
+                    <span class="status-live-badge" id="status-live-badge">
+                        <span class="status-live-dot"></span>
+                        <span class="status-live-text">ACTIU</span>
+                    </span>
+                </div>
                 <h2 id="current-state-text">--</h2>
             </div>
 
             <div class="timer-card">
-                <div class="timer">
-                    <span id="work-timer-label">Jornada</span>
+                <div class="timer" id="work-timer-box">
+                    <span id="work-timer-label">💼 Jornada</span>
                     <p id="work-timer">00:00:00</p>
                 </div>
-                <!-- NUEVO: Separador -->
+                <!-- Separador -->
                 <div class="timer-separator"></div>
-                <div class="timer">
-                    <span id="pause-timer-label">Pausa</span>
+                <div class="timer" id="pause-timer-box">
+                    <span id="pause-timer-label">☕ Pausa</span>
                     <p id="pause-timer">00:00:00</p>
                 </div>
             </div>
             
             <div id="info-message" class="info-message"></div>
-            
-
         </main>
         
         <div id="button-container" class="button-container">
@@ -66,7 +75,15 @@
         </div>
 
         <div class="log-card">
-            <h3>Registre d'Activitat</h3>
+            <div class="log-card-header">
+                <div class="terminal-dots">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <h3>Registre d'Activitat</h3>
+                <span class="log-live-badge">LIVE</span>
+            </div>
             <div id="log-container"></div>
         </div>
     </div>
