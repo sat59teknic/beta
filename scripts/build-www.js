@@ -17,7 +17,11 @@ const filesToCopy = [
     'service-worker.js',
     'manifest.json',
     'icon-192.svg',
-    'icon-512.svg'
+    'icon-512.svg',
+    'db.js',
+    'db-ui.js',
+    'sql-wasm.js',
+    'sql-wasm.wasm'
 ];
 
 if (!fs.existsSync(destDir)) {

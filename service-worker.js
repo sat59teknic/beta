@@ -1,9 +1,13 @@
-const CACHE_NAME = 'beta10-v2-no-emergency-button';
+const CACHE_NAME = 'beta10-v3-sqlite-overtime';
 const urlsToCache = [
     '/',
     '/index.html',
     '/style.css',
     '/script.js',
+    '/db.js',
+    '/db-ui.js',
+    '/sql-wasm.js',
+    '/sql-wasm.wasm',
     '/manifest.json'
 ];
 

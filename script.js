@@ -75,6 +75,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         dinar: 30 * 60 * 1000     // 30 minutos (comida)
     };
 
+    function getLocalDateString(d = new Date()) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     let appState = {
         currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
         workStartTime: null,
@@ -91,7 +98,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
         workDayStandard: null, // 8 o 9 según el día
         workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
-        workStartDay: null     // Día de inicio de jornada
+        workStartDay: null,    // Día de inicio de jornada
+        breakfastDate: null    // Data (YYYY-MM-DD) del darrer esmorzar realitzat avui
     };
 
     // 🔧 Variable para detectar cambios de estado y evitar regeneración innecesaria de botones
@@ -129,7 +137,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // 🆕 MANTENER HORARIO DINÁMICO
                 workDayStandard: parsedState.workDayStandard || null,
                 workDayType: parsedState.workDayType || null,
-                workStartDay: parsedState.workStartDay || null
+                workStartDay: parsedState.workStartDay || null,
+                breakfastDate: parsedState.breakfastDate || null
             };
 
             // LOG si hay timestamps inválidos
@@ -280,6 +289,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Función para mostrar modal de selección de tipo de pausa
     function showPauseTypeModal() {
         return new Promise((resolve) => {
+            const todayStr = getLocalDateString(new Date());
+            const breakfastDone = appState.breakfastDate === todayStr;
+
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
             modal.innerHTML = `
@@ -287,9 +299,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <h3>Tipus de Pausa</h3>
                     <p class="modal-subtitle">Selecciona el tipus de pausa que vols iniciar:</p>
                     <div class="pause-type-buttons">
-                        <button class="btn btn-secondary pause-type-btn" id="btn-pause-esmorzar">
+                        <button class="btn btn-secondary pause-type-btn ${breakfastDone ? 'disabled-breakfast' : ''}" 
+                                id="btn-pause-esmorzar" 
+                                ${breakfastDone ? 'disabled' : ''}>
                             🥐 Esmorzar
-                            <small>15 minuts (avís d'alarma en acabar)</small>
+                            <small>${breakfastDone ? '🔒 Ja realitzat avui (només disponible Dinar)' : '15 minuts (avís d\'alarma en acabar)'}</small>
                         </button>
                         <button class="btn btn-secondary pause-type-btn" id="btn-pause-dinar">
                             🍽️ Dinar
@@ -309,10 +323,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             };
 
-            document.getElementById('btn-pause-esmorzar').onclick = () => {
-                cleanup();
-                resolve('esmorçar');
-            };
+            const esmorzarBtn = document.getElementById('btn-pause-esmorzar');
+            if (esmorzarBtn && !breakfastDone) {
+                esmorzarBtn.onclick = () => {
+                    cleanup();
+                    resolve('esmorçar');
+                };
+            }
 
             document.getElementById('btn-pause-dinar').onclick = () => {
                 cleanup();
@@ -342,6 +359,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             const modal = document.createElement('div');
             modal.className = 'modal-overlay';
 
+            // Si són hores extra, les observacions són SEMPRE estrictament obligatòries
+            const isStrictRequired = isOvertime || required;
+            const effectiveCancelText = 'Cancel·lar'; // Botó de finalitzar sense comentari ELIMINAT
+
             let overtimeHtml = '';
             if (isOvertime && overtimeDetails) {
                 overtimeHtml = `
@@ -363,7 +384,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 <span class="ot-value extra">${overtimeDetails.extraText}</span>
                             </div>
                         </div>
-                        <p class="overtime-note">Has superat la jornada habitual en més de 30 minuts. Si us plau, especifica el motiu o client a les observacions.</p>
+                        <p class="overtime-note">⚠️ Has superat la jornada habitual en més de 30 minuts. Has d'indicar el motiu o feina realitzada obligatòriament.</p>
                     </div>
                 `;
             }
@@ -375,7 +396,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     ${overtimeHtml}
                     <textarea id="observations-input" placeholder="${placeholder}" maxlength="250">${defaultValue}</textarea>
                     <div class="modal-buttons">
-                        <button type="button" class="btn btn-secondary" id="modal-cancel-btn">${cancelText}</button>
+                        <button type="button" class="btn btn-secondary" id="modal-cancel-btn">${effectiveCancelText}</button>
                         <button type="button" class="btn btn-start" id="modal-confirm-btn">${confirmText}</button>
                     </div>
                 </div>
@@ -408,8 +429,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             confirmBtn.onclick = () => {
                 const text = input ? input.value.trim() : '';
-                if (required && !text) {
-                    alert('Has d\'indicar observacions obligatòriament.');
+                if (isStrictRequired && !text) {
+                    alert('⚠️ Per a les hores extra és obligatori indicar un comentari detallant la feina o motiu.');
                     if (input) input.focus();
                     return;
                 }
@@ -574,6 +595,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             const userText = ` [${activeUser}]`;
             logActivity(`✅ Beta10 OK (${duration}ms): ${action} con punto '${point}' registrado${obsText}${userText}`);
             
+            // 💾 Registrar fitxatge a la base de dades SQLite local
+            if (window.beta10DB) {
+                window.beta10DB.recordFichaje({
+                    user: activeUser,
+                    timestamp: new Date().toISOString(),
+                    action: action,
+                    point: point,
+                    observations: observations,
+                    latitude: appState.currentLocation?.latitude,
+                    longitude: appState.currentLocation?.longitude
+                }).catch(e => console.warn('⚠️ Error gravant fitxatge a SQLite:', e));
+            }
+
             return result;
 
         } catch (error) {
@@ -626,12 +660,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Si hi ha hores extra detectades (>30 minuts), obrir la pantalla d'hores extra
                 if (hasOvertime) {
-                    const isMandatory = standardWorkDay === 0;
                     logActivity(`💰 ${dayType}: Detectades ${extraText} d'hores extra`);
 
                     const obsResult = await showObservationsModal({
                         title: `💰 Hores Extra Detectades (${extraText})`,
-                        subtitle: `Has superat la jornada estàndard de ${standardFormatted}.`,
+                        subtitle: `Has superat la jornada habitual de ${standardFormatted}. Has d'indicar motiu o feina realitzada.`,
                         isOvertime: true,
                         overtimeDetails: {
                             totalHoursFormatted,
@@ -641,16 +674,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                         },
                         placeholder: `Ex: ${extraText} Feina allargada per incidència client XYZ...`,
                         defaultValue: `${extraText} `,
-                        required: isMandatory,
+                        required: true,
                         confirmText: 'Confirmar i Finalitzar',
-                        cancelText: isMandatory ? 'Cancel·lar' : 'Finalitzar sense comentari'
+                        cancelText: 'Cancel·lar'
                     });
 
                     if (obsResult === null) {
-                        if (isMandatory) {
-                            logActivity('⚠️ Finalització cancel·lada (observacions obligatòries)');
-                            return;
-                        }
+                        logActivity('⚠️ Finalització cancel·lada (les hores extra requereixen comentari obligatori)');
+                        return;
                     } else {
                         observations = obsResult;
                     }
@@ -773,6 +804,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             appState.currentPauseStart = new Date();
             appState.currentPauseType = pauseType;
             appState.pauseAlarmTriggered = false;
+            if (pauseType === 'esmorçar') {
+                appState.breakfastDate = getLocalDateString(new Date());
+            }
             
             // 1. Mantenir pantalla activa durant la pausa
             await requestWakeLock();
@@ -815,7 +849,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                 action: 'entrada', point: 'J', newState: 'JORNADA',
                 onComplete: () => {
                     if (appState.currentPauseStart) {
-                        const pauseDuration = new Date() - appState.currentPauseStart;
+                        const now = new Date();
+                        const pauseDuration = now - appState.currentPauseStart;
+                        const pauseType = appState.currentPauseType || 'pausa';
+                        const pauseMinutes = pauseDuration / (1000 * 60);
+
+                        if (pauseType === 'esmorçar') {
+                            appState.breakfastDate = getLocalDateString(now);
+                        }
+
+                        // 💾 Registrar pausa a la base de dades local SQLite
+                        if (window.beta10DB) {
+                            const creds = authManager.getCredentials();
+                            window.beta10DB.recordPausa({
+                                user: creds?.username || 'usuari',
+                                date: getLocalDateString(appState.currentPauseStart),
+                                type: pauseType,
+                                startTime: appState.currentPauseStart,
+                                endTime: now,
+                                durationMinutes: pauseMinutes
+                            }).catch(e => console.warn('⚠️ Error gravant pausa a SQLite:', e));
+                        }
+
                         appState.totalPauseTimeToday += pauseDuration;
                         appState.currentPauseStart = null;
                         appState.currentPauseType = null;
@@ -837,35 +892,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function endWorkday(withObs = false) {
         let customObservations = '';
 
-        if (withObs) {
-            const extraInfo = calculateExtraHours();
-            const standardWorkDay = extraInfo.standardWorkDay;
-            const dayType = appState.workDayType || getDayTypeName(new Date());
-            const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
-            const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
+        const extraInfo = calculateExtraHours();
+        const standardWorkDay = extraInfo.standardWorkDay;
+        const dayType = appState.workDayType || getDayTypeName(new Date());
+        const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
+        const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
 
-            let extraText = '';
-            let hasOvertime = false;
-            if (standardWorkDay === 0) {
-                if (extraInfo.totalHours >= 0.5) {
-                    hasOvertime = true;
-                    const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                    const hours = Math.floor(totalBlocks / 2);
-                    const mins = (totalBlocks % 2) * 30;
-                    extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
-                }
-            } else if (extraInfo.extraHours >= 0.5) {
+        let extraText = '';
+        let hasOvertime = false;
+        if (standardWorkDay === 0) {
+            if (extraInfo.totalHours >= 0.5) {
                 hasOvertime = true;
-                const extraBlocks = extraInfo.extraBlocks;
-                const hours = Math.floor(extraBlocks / 2);
-                const mins = (extraBlocks % 2) * 30;
+                const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
+                const hours = Math.floor(totalBlocks / 2);
+                const mins = (totalBlocks % 2) * 30;
                 extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
             }
+        } else if (extraInfo.extraHours >= 0.5) {
+            hasOvertime = true;
+            const extraBlocks = extraInfo.extraBlocks;
+            const hours = Math.floor(extraBlocks / 2);
+            const mins = (extraBlocks % 2) * 30;
+            extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
+        }
 
+        if (withObs || hasOvertime) {
             const obsResult = await showObservationsModal({
-                title: hasOvertime ? `💰 Hores Extra (${extraText}) + Comentari` : '💬 Observacions de Sortida',
+                title: hasOvertime ? `💰 Hores Extra (${extraText}) Detectades` : '💬 Observacions de Sortida',
                 subtitle: hasOvertime 
-                    ? `Has superat la jornada habitual en més de 30 minuts.` 
+                    ? `Has superat la jornada habitual de ${standardFormatted}. Has d'indicar obligatòriament el motiu o feina.` 
                     : `Finalització de jornada (${totalHoursFormatted} totals).`,
                 isOvertime: hasOvertime,
                 overtimeDetails: hasOvertime ? {
@@ -878,13 +933,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                     ? `Ex: ${extraText} Feina allargada per incidència client XYZ...` 
                     : 'Introdueix observacions de sortida...',
                 defaultValue: hasOvertime ? `${extraText} ` : '',
+                required: hasOvertime, // Obligatori si hi ha hores extra
                 confirmText: '⛔ Finalitzar Jornada',
                 cancelText: 'Cancel·lar'
             });
 
-            if (obsResult === null) return; // Cancel·lat per l'usuari
+            if (obsResult === null) {
+                logActivity('⚠️ Finalització cancel·lada per l\'usuari');
+                return; // Cancel·lat per l'usuari
+            }
             customObservations = obsResult;
         }
+
+        // Dades necessàries per al registre a SQLite
+        const startWorkDate = appState.workStartTime;
+        const totalPauseMs = appState.totalPauseTimeToday;
+        const currentStandardHours = appState.workDayStandard ?? 9;
+        const currentDayType = appState.workDayType || getDayTypeName(new Date());
+        const shiftType = appState.currentState === 'ALMACEN' ? 'ALMACEN' : 'JORNADA';
 
         const actions = [];
         
@@ -903,6 +969,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (actions.length > 0) {
             actions[actions.length - 1].newState = 'FUERA';
             actions[actions.length - 1].onComplete = () => {
+                const now = new Date();
+                const totalWorkMs = startWorkDate ? (now - startWorkDate - totalPauseMs) : 0;
+                const workedHours = Math.max(0, totalWorkMs / (1000 * 60 * 60));
+                const pauseMinutes = totalPauseMs / (1000 * 60);
+
+                // 💾 Registrar jornada a SQLite
+                if (window.beta10DB && startWorkDate) {
+                    const creds = authManager.getCredentials();
+                    window.beta10DB.recordJornada({
+                        user: creds?.username || 'usuari',
+                        date: getLocalDateString(startWorkDate),
+                        startTime: startWorkDate,
+                        endTime: now,
+                        type: shiftType,
+                        dayType: currentDayType,
+                        standardHours: currentStandardHours,
+                        workedHours: workedHours,
+                        extraHours: extraInfo.extraHours || 0,
+                        pauseMinutes: pauseMinutes,
+                        observations: customObservations || ''
+                    }).catch(e => console.warn('⚠️ Error gravant jornada a SQLite:', e));
+                }
+
                 appState.workStartTime = null;
                 appState.currentPauseStart = null;
                 appState.currentPauseType = null;
@@ -1315,12 +1404,101 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         dom.buttonContainer.innerHTML = ''; // Limpiar botones
 
+        const showQuickTapToast = () => {
+            let toast = document.getElementById('hold-quick-tap-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'hold-quick-tap-toast';
+                toast.className = 'hold-quick-tap-toast';
+                toast.textContent = '⏱️ Mantingues premut 2 segons per activar';
+                document.body.appendChild(toast);
+            }
+            toast.classList.add('show');
+            if (window._quickToastTimeout) clearTimeout(window._quickToastTimeout);
+            window._quickToastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 1800);
+        };
+
         const createButton = (text, className, action, disabled = false) => {
             const btn = document.createElement('button');
-            btn.innerHTML = text;
-            btn.className = `btn ${className}`;
-            btn.onclick = action;
+            btn.className = `btn ${className} btn-holdable`;
             btn.disabled = disabled;
+
+            btn.innerHTML = `
+                <div class="btn-hold-progress"></div>
+                <div class="btn-content-wrap">
+                    <span class="btn-main-text">${text}</span>
+                    <span class="btn-hold-timer-tag">Prem 2s</span>
+                </div>
+            `;
+
+            if (disabled) {
+                btn.onclick = () => {
+                    if (action) action();
+                };
+                return btn;
+            }
+
+            let holdTimer = null;
+            let isHolding = false;
+            let holdStartTime = 0;
+
+            const startHold = (e) => {
+                if (btn.disabled) return;
+                // Prevenir menú contextual o selecció
+                if (e.cancelable) e.preventDefault();
+
+                isHolding = true;
+                holdStartTime = Date.now();
+                btn.classList.add('is-holding');
+
+                if (navigator.vibrate) {
+                    navigator.vibrate(30);
+                }
+
+                holdTimer = setTimeout(() => {
+                    if (!isHolding) return;
+                    isHolding = false;
+                    btn.classList.remove('is-holding');
+                    btn.classList.add('is-triggered');
+
+                    if (navigator.vibrate) {
+                        navigator.vibrate([70, 40, 70]);
+                    }
+
+                    setTimeout(() => {
+                        btn.classList.remove('is-triggered');
+                    }, 400);
+
+                    // Execució intencionada de l'acció
+                    action();
+                }, 2000);
+            };
+
+            const cancelHold = (e) => {
+                if (!isHolding) return;
+                const elapsed = Date.now() - holdStartTime;
+                isHolding = false;
+                btn.classList.remove('is-holding');
+
+                if (holdTimer) {
+                    clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+
+                // Si ha estat una pulsació massa ràpida (menys de 2s)
+                if (elapsed < 1900 && elapsed > 40) {
+                    showQuickTapToast();
+                }
+            };
+
+            btn.addEventListener('pointerdown', startHold);
+            btn.addEventListener('pointerup', cancelHold);
+            btn.addEventListener('pointercancel', cancelHold);
+            btn.addEventListener('pointerleave', cancelHold);
+            btn.addEventListener('contextmenu', (e) => e.preventDefault());
+
             return btn;
         };
 
@@ -1331,6 +1509,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             row.appendChild(btn2);
             dom.buttonContainer.appendChild(row);
         };
+
+        // Indicador visual superior
+        const hint = document.createElement('div');
+        hint.className = 'hold-info-hint';
+        hint.innerHTML = '<span>🔒</span> Mantén 2s qualsevol botó per confirmar';
+        dom.buttonContainer.appendChild(hint);
 
         switch (appState.currentState) {
             case 'FUERA':
@@ -1505,6 +1689,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function init() {
         loadState();
         
+        // 💾 INICIALITZAR SQLITE I UI D'ESTADÍSTIQUES
+        if (window.beta10DB) {
+            window.beta10DB.init().then(() => {
+                logActivity('💾 Base de dades SQLite llesta (registres locals)');
+                if (window.beta10DBUI) {
+                    window.beta10DBUI.init();
+                }
+            }).catch(err => {
+                console.error('Error inicialitzant SQLite:', err);
+                logActivity(`⚠️ Error SQLite: ${err.message}`);
+            });
+        }
+
         // 🔍 VALIDACIÓ INICIAL D'ESTAT
         const wasFixed = validateAppState();
         if (wasFixed) {
