@@ -1396,11 +1396,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             }
 
-            // 4. Mostrar notificación visual persistente
+            // 4. Mostrar notificació visual persistent amb botó per silenciar el soroll
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            dom.infoMessage.textContent = `🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!`;
+            dom.infoMessage.innerHTML = `
+                <div>🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!</div>
+                <button id="btn-silence-alarm" style="margin-top:12px; padding:10px 20px; background:#e74c3c; color:white; border:2px solid #ffffff; border-radius:10px; font-weight:700; cursor:pointer; font-size:15px; box-shadow:0 4px 12px rgba(231,76,60,0.5); display:inline-flex; align-items:center; gap:8px;">
+                    🔕 Aturar Soroll / Silenciar Alarma
+                </button>
+            `;
             dom.infoMessage.classList.remove('success');
             dom.infoMessage.classList.add('alert');
+
+            const btnSilence = document.getElementById('btn-silence-alarm');
+            if (btnSilence) {
+                btnSilence.onclick = (e) => {
+                    e.stopPropagation();
+                    stopAlarm();
+                    dom.infoMessage.innerHTML = `<div>🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!</div>`;
+                    dom.infoMessage.classList.add('alert');
+                    logActivity('🔕 Alarma silenciada per l\'usuari');
+                };
+            }
 
             logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
 
@@ -1440,9 +1456,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             alarmIntervalGlobal = null;
         }
 
-        dom.infoMessage.classList.remove('alert');
-        dom.infoMessage.classList.remove('success');
-        dom.infoMessage.textContent = "";
+        const btnSilence = document.getElementById('btn-silence-alarm');
+        if (btnSilence) {
+            btnSilence.remove();
+        }
     }
 
     // --- ACTUALIZACIÓN DE UI Y TIMERS ---
@@ -1883,6 +1900,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                             logActivity('🔔 Alarma activada pel Service Worker');
                             // 🐛 FIX #4: Pasar 'service-worker' como fuente
                             playPauseAlarm(event.data.pauseType, 'service-worker');
+                        } else if (event.data && event.data.type === 'STOP_ALARM') {
+                            logActivity('🔕 Alarma silenciada des de la notificació');
+                            stopAlarm();
                         }
                     });
                 })

@@ -162,8 +162,13 @@ function showNotification(pauseType, timeLimit) {
         vibrate: [800, 200, 800, 200, 800, 200, 1200, 300, 1200],
         actions: [
             {
+                action: 'silence',
+                title: '🔕 Silenciar Alarma',
+                icon: '/icon-192.svg'
+            },
+            {
                 action: 'return-to-work',
-                title: 'Tornar a la jornada',
+                title: '▶️ Tornar a la jornada',
                 icon: '/icon-192.svg'
             }
         ],
@@ -179,9 +184,19 @@ function showNotification(pauseType, timeLimit) {
 
 // 🔔 Manejar clics en notificaciones
 self.addEventListener('notificationclick', event => {
-    console.log('🔔 Notificación clickeada:', event.notification.tag);
+    console.log('🔔 Notificación clickeada:', event.notification.tag, 'Acción:', event.action);
     
     event.notification.close();
+    
+    // Si l'usuari clica expressament a "Silenciar Alarma"
+    if (event.action === 'silence') {
+        self.clients.matchAll().then(clients => {
+            clients.forEach(client => {
+                client.postMessage({ type: 'STOP_ALARM' });
+            });
+        });
+        return;
+    }
     
     // Abrir o enfocar la app
     event.waitUntil(
@@ -201,9 +216,15 @@ self.addEventListener('notificationclick', event => {
     );
 });
 
-// 🔔 Manejar cierre de notificaciones
+// 🔔 Manejar cierre de notificaciones (lliscament/descartat)
 self.addEventListener('notificationclose', event => {
-    console.log('🔕 Notificación cerrada:', event.notification.tag);
+    console.log('🔕 Notificación cerrada o descartada:', event.notification.tag);
+    // Quan l'usuari descarta la notificació, silenciar l'alarma
+    self.clients.matchAll().then(clients => {
+        clients.forEach(client => {
+            client.postMessage({ type: 'STOP_ALARM' });
+        });
+    });
 });
 
 console.log('✅ Service Worker: Cargado con soporte para alarmas');
