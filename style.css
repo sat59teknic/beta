@@ -1875,4 +1875,208 @@ textarea:focus-visible {
     }
 }
 
+/* --- CALENDARI D'HORES EXTRA --- */
+.db-calendar-container {
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #e5e5ea);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.db-cal-nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.db-cal-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-color, #1c1c1e);
+}
+
+.db-cal-nav-btn {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid var(--border-color, #e5e5ea);
+    color: var(--text-color, #1c1c1e);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.db-cal-nav-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.1);
+    transform: scale(1.05);
+}
+
+.db-cal-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.db-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.cal-th {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--subtle-text-color, #8e8e93);
+    text-transform: uppercase;
+    padding: 4px 0 6px 0;
+}
+
+.cal-day {
+    min-height: 48px;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 8px;
+    padding: 4px 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.cal-day.empty {
+    background: transparent;
+    border-color: transparent;
+}
+
+.cal-day.is-weekend {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.cal-date-num {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--subtle-text-color, #8e8e93);
+    line-height: 1;
+}
+
+.cal-day.has-overtime {
+    background: #fffbeb;
+    border: 1.5px solid #f59e0b;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.2);
+}
+
+.cal-day.has-overtime:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+    border-color: #d97706;
+}
+
+.cal-day.has-overtime .cal-date-num {
+    color: #92400e;
+    font-weight: 700;
+}
+
+.cal-ot-badge {
+    background: #f59e0b;
+    color: #ffffff;
+    font-size: 9.5px;
+    font-weight: 800;
+    padding: 2px 4px;
+    border-radius: 4px;
+    margin-top: 2px;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1.1;
+}
+
+.cal-dot-obs {
+    font-size: 8px;
+    line-height: 1;
+    margin-top: 1px;
+}
+
+.db-cal-legend {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color, #e5e5ea);
+}
+
+.legend-item {
+    font-size: 11px;
+    color: var(--subtle-text-color, #8e8e93);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.legend-dot.ot {
+    background: #f59e0b;
+    border: 1px solid #d97706;
+}
+
+.legend-dot.weekend {
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.highlight-glow {
+    animation: cardGlow 1.8s ease-in-out;
+}
+
+@keyframes cardGlow {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+    30% { transform: scale(1.02); box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.4); border-color: #f59e0b; }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+@media (prefers-color-scheme: dark) {
+    .db-calendar-container {
+        background: #2c2c2e;
+        border-color: #3a3a3c;
+    }
+    .db-cal-title {
+        color: #f5f5f7;
+    }
+    .db-cal-nav-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: #3a3a3c;
+        color: #f5f5f7;
+    }
+    .cal-day {
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.06);
+    }
+    .cal-day.is-weekend {
+        background: rgba(255, 255, 255, 0.06);
+    }
+    .cal-day.has-overtime {
+        background: #2d2006;
+        border-color: #f59e0b;
+    }
+    .cal-day.has-overtime .cal-date-num {
+        color: #fde68a;
+    }
+    .legend-dot.weekend {
+        background: rgba(255, 255, 255, 0.2);
+    }
+}
+
 

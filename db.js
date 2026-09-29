@@ -284,6 +284,26 @@ class Beta10Database {
     }
 
     /**
+     * Retorna totes les jornades d'un mes específic (ex: '2026-09')
+     */
+    async getJornadasForMonth(yearMonth) {
+        await this.init();
+        const sql = `
+            SELECT * FROM jornadas 
+            WHERE strftime('%Y-%m', date) = ? 
+            ORDER BY date ASC, id ASC;
+        `;
+        const stmt = this.db.prepare(sql);
+        stmt.bind([yearMonth]);
+        const rows = [];
+        while (stmt.step()) {
+            rows.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return rows;
+    }
+
+    /**
      * Retorna el resum de pauses diàries (desglossat per esmorzar, dinar i total)
      */
     async getDailyPausesSummary(limit = 60) {

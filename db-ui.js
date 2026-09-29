@@ -128,7 +128,7 @@ class Beta10DBUI {
     }
 
     /**
-     * PESTANYA 1: Hores Extra Mensuals
+     * PESTANYA 1: Hores Extra Mensuals amb Calendari Interactiu
      */
     async renderOvertimeTab(container) {
         const monthlySummary = await window.beta10DB.getMonthlyOvertimeSummary();
@@ -149,7 +149,8 @@ class Beta10DBUI {
             this.selectedMonth = monthlySummary[0].month;
         }
 
-        const currentMonthData = monthlySummary.find(m => m.month === this.selectedMonth) || monthlySummary[0];
+        const currentMonthIdx = monthlySummary.findIndex(m => m.month === this.selectedMonth);
+        const currentMonthData = currentMonthIdx >= 0 ? monthlySummary[currentMonthIdx] : monthlySummary[0];
         const daysInMonth = await window.beta10DB.getOvertimeDaysForMonth(currentMonthData.month);
 
         const formatMonthName = (mStr) => {
@@ -172,6 +173,52 @@ class Beta10DBUI {
             </option>
         `).join('');
 
+        // --- CONSTRUIR GRAELLA DE CALENDARI ---
+        const [yNum, mNum] = currentMonthData.month.split('-').map(Number);
+        const daysInCurrentMonth = new Date(yNum, mNum, 0).getDate();
+        const firstDayIdx = new Date(yNum, mNum - 1, 1).getDay();
+        const startDayOffset = firstDayIdx === 0 ? 6 : firstDayIdx - 1; // Dilluns = 0, Diumenge = 6
+
+        // Mapa de dies amb hores extra
+        const overtimeMap = new Map();
+        daysInMonth.forEach(d => {
+            overtimeMap.set(d.date, d);
+        });
+
+        const weekDayHeaders = ['Dl', 'Dm', 'Dc', 'Dj', 'Dv', 'Ds', 'Dg'];
+        let calHeadersHtml = weekDayHeaders.map(w => `<div class="cal-th">${w}</div>`).join('');
+
+        let calDaysHtml = '';
+        // Cel·les buides abans del dia 1
+        for (let i = 0; i < startDayOffset; i++) {
+            calDaysHtml += `<div class="cal-day empty"></div>`;
+        }
+
+        for (let day = 1; day <= daysInCurrentMonth; day++) {
+            const dayStr = String(day).padStart(2, '0');
+            const dateStr = `${yNum}-${String(mNum).padStart(2, '0')}-${dayStr}`;
+            const otData = overtimeMap.get(dateStr);
+            const dateObj = new Date(yNum, mNum - 1, day);
+            const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+
+            if (otData) {
+                calDaysHtml += `
+                    <div class="cal-day has-overtime" data-date="${dateStr}" title="Dia ${day}: +${formatHoursMin(otData.extra_hours)}">
+                        <span class="cal-date-num">${day}</span>
+                        <span class="cal-ot-badge">+${formatHoursMin(otData.extra_hours)}</span>
+                        ${otData.observations ? '<span class="cal-dot-obs">💬</span>' : ''}
+                    </div>
+                `;
+            } else {
+                calDaysHtml += `
+                    <div class="cal-day ${isWeekend ? 'is-weekend' : 'regular'}" data-date="${dateStr}">
+                        <span class="cal-date-num">${day}</span>
+                    </div>
+                `;
+            }
+        }
+
+        // --- CONSTRUIR TARGETES DE DETALL PER DIA ---
         let daysHtml = daysInMonth.map(d => {
             const dateObj = new Date(d.date + 'T12:00:00');
             const dayNames = ['Diumenge', 'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Divendres', 'Dissabte'];
@@ -180,7 +227,7 @@ class Beta10DBUI {
             const formattedDate = `${day}/${m}/${y}`;
 
             return `
-                <div class="db-overtime-day-card">
+                <div class="db-overtime-day-card" data-card-date="${d.date}" id="card-date-${d.date}">
                     <div class="db-ot-day-header">
                         <div class="db-ot-day-title">
                             <span class="db-day-badge">${dayName}</span>
@@ -222,13 +269,31 @@ class Beta10DBUI {
                     </div>
                 </div>
 
-                <h4 class="db-section-title">Desglossament per Dies</h4>
+                <!-- 📅 CALENDARI MENSUAL D'HORES EXTRA -->
+                <div class="db-calendar-container">
+                    <div class="db-cal-nav-bar">
+                        <button id="db-cal-prev-month" class="db-cal-nav-btn" title="Mes anterior">◀</button>
+                        <h4 class="db-cal-title">📅 ${formatMonthName(currentMonthData.month)}</h4>
+                        <button id="db-cal-next-month" class="db-cal-nav-btn" title="Mes següent">▶</button>
+                    </div>
+                    <div class="db-calendar-grid">
+                        ${calHeadersHtml}
+                        ${calDaysHtml}
+                    </div>
+                    <div class="db-cal-legend">
+                        <span class="legend-item"><span class="legend-dot ot"></span> Hores Extra (clic per veure detall)</span>
+                        <span class="legend-item"><span class="legend-dot weekend"></span> Cap de setmana</span>
+                    </div>
+                </div>
+
+                <h4 class="db-section-title">Desglossament per Dies (${daysInMonth.length})</h4>
                 <div class="db-overtime-list">
                     ${daysHtml}
                 </div>
             </div>
         `;
 
+        // Navegació de mesos amb desplegable
         const selectElem = container.querySelector('#db-month-select');
         if (selectElem) {
             selectElem.onchange = (e) => {
@@ -236,6 +301,41 @@ class Beta10DBUI {
                 this.renderActiveTab();
             };
         }
+
+        // Navegació de mesos amb botons ◀ i ▶
+        const prevBtn = container.querySelector('#db-cal-prev-month');
+        const nextBtn = container.querySelector('#db-cal-next-month');
+        if (prevBtn) {
+            prevBtn.disabled = currentMonthIdx >= monthlySummary.length - 1;
+            prevBtn.onclick = () => {
+                if (currentMonthIdx < monthlySummary.length - 1) {
+                    this.selectedMonth = monthlySummary[currentMonthIdx + 1].month;
+                    this.renderActiveTab();
+                }
+            };
+        }
+        if (nextBtn) {
+            nextBtn.disabled = currentMonthIdx <= 0;
+            nextBtn.onclick = () => {
+                if (currentMonthIdx > 0) {
+                    this.selectedMonth = monthlySummary[currentMonthIdx - 1].month;
+                    this.renderActiveTab();
+                }
+            };
+        }
+
+        // Clic a una cel·la del calendari amb hores extra: desplaçament suau i ressaltat
+        container.querySelectorAll('.cal-day.has-overtime').forEach(el => {
+            el.onclick = () => {
+                const date = el.getAttribute('data-date');
+                const targetCard = container.querySelector(`[data-card-date="${date}"]`);
+                if (targetCard) {
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetCard.classList.add('highlight-glow');
+                    setTimeout(() => targetCard.classList.remove('highlight-glow'), 2000);
+                }
+            };
+        });
     }
 
     /**
