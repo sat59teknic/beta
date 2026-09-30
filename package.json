@@ -5,6 +5,7 @@
   "main": "api/beta10.js",
   "scripts": {
     "build": "node scripts/build-www.js",
+    "test": "node scripts/run-all-tests.js",
     "dev": "vercel dev",
     "encrypt-creds": "node scripts/encrypt-credentials.js"
   },
