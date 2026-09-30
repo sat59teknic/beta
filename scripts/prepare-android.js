@@ -37,3 +37,15 @@ if (!manifest.includes('usesCleartextTraffic')) {
 
 fs.writeFileSync(manifestPath, manifest, 'utf8');
 console.log('✅ AndroidManifest.xml actualitzat amb èxit!');
+
+// Copiar so d'alarma a res/raw per a les notificacions natives d'Android
+const rawDir = path.resolve(__dirname, '../android/app/src/main/res/raw');
+if (!fs.existsSync(rawDir)) {
+    fs.mkdirSync(rawDir, { recursive: true });
+}
+const srcAlarm = path.resolve(__dirname, '../alarm.wav');
+if (fs.existsSync(srcAlarm)) {
+    fs.copyFileSync(srcAlarm, path.join(rawDir, 'alarm.wav'));
+    console.log('✅ alarm.wav copiat a res/raw per al timbre de la notificació nativa.');
+}
+

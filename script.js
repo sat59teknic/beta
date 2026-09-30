@@ -839,60 +839,68 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function endPause() {
-        // Aturar àudio d'alarma o keep-alive
+    async function endPause() {
+        // 1. Aturar alarma, cancel·lar notificacions i alliberar recursos
+        stopAlarm();
         stopAlarmAudio();
+        await cancelScheduledNotification();
+        await releaseWakeLock();
 
-        // Cancelar notificación programada
-        cancelScheduledNotification();
+        if (appState.currentState !== 'PAUSA') {
+            return;
+        }
 
-        // Liberar wake lock
-        releaseWakeLock();
+        // 2. DETENIR EL TEMPS DE PAUSA EXACTE EN AQUEST INSTANT
+        const now = new Date();
+        const pauseStart = appState.currentPauseStart ? new Date(appState.currentPauseStart) : now;
+        const pauseDuration = Math.max(0, now - pauseStart);
+        const pauseMinutes = pauseDuration / (1000 * 60);
+        const pauseType = appState.currentPauseType || 'pausa';
 
-        handleAction([
-            { action: 'salida', point: 'P' },
-            {
-                action: 'entrada', point: 'J', newState: 'JORNADA',
-                onComplete: () => {
-                    if (appState.currentPauseStart) {
-                        const now = new Date();
-                        const pauseDuration = now - appState.currentPauseStart;
-                        const pauseType = appState.currentPauseType || 'pausa';
-                        const pauseMinutes = pauseDuration / (1000 * 60);
+        if (pauseType === 'esmorçar') {
+            appState.breakfastDate = getLocalDateString(now);
+        }
 
-                        if (pauseType === 'esmorçar') {
-                            appState.breakfastDate = getLocalDateString(now);
-                        }
+        // 3. REGISTRAR IMMEDIATAMENT A LA BASE DE DADES SQLITE
+        if (window.beta10DB) {
+            const creds = authManager?.getCredentials();
+            window.beta10DB.recordPausa({
+                user: creds?.username || 'usuari',
+                date: getLocalDateString(pauseStart),
+                type: pauseType,
+                startTime: pauseStart,
+                endTime: now,
+                durationMinutes: pauseMinutes
+            }).then(() => {
+                logActivity(`💾 Pausa de ${pauseType} (${Math.round(pauseMinutes)} min) guardada a SQLite`);
+            }).catch(e => console.warn('⚠️ Error gravant pausa a SQLite:', e));
+        }
 
-                        // 💾 Registrar pausa a la base de dades local SQLite
-                        if (window.beta10DB) {
-                            const creds = authManager.getCredentials();
-                            window.beta10DB.recordPausa({
-                                user: creds?.username || 'usuari',
-                                date: getLocalDateString(appState.currentPauseStart),
-                                type: pauseType,
-                                startTime: appState.currentPauseStart,
-                                endTime: now,
-                                durationMinutes: pauseMinutes
-                            }).catch(e => console.warn('⚠️ Error gravant pausa a SQLite:', e));
-                        }
+        // 4. ATURAR EL TEMPS A L'ESTAT LOCAL IMMEDIATAMENT
+        appState.totalPauseTimeToday += pauseDuration;
+        appState.currentPauseStart = null;
+        appState.currentPauseType = null;
+        appState.currentState = 'JORNADA';
+        appState.pauseAlarmTriggered = false;
+        appState.lastAlarmTime = null;
+        appState.alarmSource = null;
+        appState.wakeLockLost = false;
 
-                        appState.totalPauseTimeToday += pauseDuration;
-                        appState.currentPauseStart = null;
-                        appState.currentPauseType = null;
-                        appState.pauseAlarmTriggered = false;
-                        appState.lastAlarmTime = null; // 🔧 Resetear tiempo de última alarma
-                        appState.alarmSource = null; // 🐛 FIX: Resetear fuente de alarma
-                        appState.wakeLockLost = false; // 🐛 FIX: Resetear flag de wake lock perdido
-                        stopAlarm();
+        saveState();
+        updateUI();
 
-                        // Limpiar mensaje de pausa
-                        dom.infoMessage.classList.remove('success');
-                        dom.infoMessage.textContent = "";
-                    }
-                }
-            }
-        ]);
+        logActivity(`⏱️ Temps de pausa aturat: ${Math.round(pauseMinutes)} minuts computats.`);
+
+        // 5. ENVIAR FITXATGES AL SERVIDOR REMOT BETA10
+        try {
+            await handleAction([
+                { action: 'salida', point: 'P' },
+                { action: 'entrada', point: 'J', newState: 'JORNADA' }
+            ]);
+        } catch (error) {
+            logActivity(`⚠️ Error xarxa fitxant tornada de pausa a Beta10: ${error.message}. El temps de pausa local ja s'ha aturat.`);
+            showTranslatedError(error);
+        }
     }
 
     async function endWorkday(withObs = false) {
@@ -1114,6 +1122,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                     lights: true,
                     lightColor: '#E74C3C'
                 });
+
+                // Registrar botó d'acció a la notificació d'Android per aturar el timbre directament
+                try {
+                    await LocalNotifications.registerActionTypes({
+                        types: [
+                            {
+                                id: 'PAUSE_ALARM_ACTIONS',
+                                actions: [
+                                    {
+                                        id: 'STOP_ALARM',
+                                        title: '🔕 Aturar Alarma',
+                                        destructive: true
+                                    }
+                                ]
+                            }
+                        ]
+                    });
+                } catch (actErr) {
+                    console.warn('⚠️ No s\'han pogut registrar tipus d\'acció:', actErr);
+                }
+
                 console.log('✅ Canal de notificacions nativa d\'alta prioritat amb so d\'alarma preparat');
             } catch (err) {
                 console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
@@ -1127,7 +1156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             try {
                 const { LocalNotifications } = window.Capacitor.Plugins;
                 
-                // Quan la notificació es dispara mentre l'app està oberta o en segon pla
+                // Quan la notificació es dispara mentre l'app està en primer pla o segon pla
                 LocalNotifications.addListener('localNotificationReceived', (notification) => {
                     logActivity(`🔔 Notificació d'alarma rebuda: ${notification.title}`);
                     if (appState.currentState === 'PAUSA') {
@@ -1135,11 +1164,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 });
 
-                // Quan l'usuari toca la notificació des de la barra d'Android o pantalla de bloqueig
-                LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
-                    logActivity('👆 Notificació d\'alarma oberta per l\'usuari');
-                    if (appState.currentState === 'PAUSA') {
-                        playPauseAlarm(appState.currentPauseType || 'pausa', 'notification-click');
+                // Quan l'usuari toca la notificació o un dels seus botons des de la barra d'Android
+                LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
+                    const actionId = notificationAction?.actionId;
+                    logActivity(`👆 Notificació d'alarma acció: ${actionId || 'oberta'}`);
+                    if (actionId === 'STOP_ALARM') {
+                        stopAlarm();
+                        logActivity('🔕 Alarma detinguda directament des de la notificació');
+                    } else if (appState.currentState === 'PAUSA') {
+                        // Només aturar si ja està sonant
+                        stopAlarm();
                     }
                 });
                 
@@ -1264,7 +1298,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             smallIcon: 'ic_launcher_round',
                             iconColor: '#E74C3C',
                             sound: 'alarm.wav',
-                            actionTypeId: '',
+                            actionTypeId: 'PAUSE_ALARM_ACTIONS',
                             extra: {
                                 pauseType: pauseType
                             }
@@ -1292,12 +1326,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    // Cancelar notificación programada
+    // Cancelar notificación programada i netejar notificacions actives de la barra
     async function cancelScheduledNotification() {
         try {
             if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
                 const { LocalNotifications } = window.Capacitor.Plugins;
                 await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+                try {
+                    if (LocalNotifications.removeDeliveredNotifications) {
+                        await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id: 1001 }] });
+                    }
+                } catch (e) {}
                 logActivity('🔕 Alarma nativa en segon pla cancel·lada');
             } else if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await navigator.serviceWorker.ready;
@@ -1337,15 +1376,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const now = new Date();
         const timeSinceLastAlarm = appState.lastAlarmTime ? now - appState.lastAlarmTime : Infinity;
 
-        // 🐛 FIX #1: Prevenir doble disparo desde diferentes fuentes
-        if (appState.isAlarmPlaying && appState.alarmSource) {
-            logActivity(`⚠️ Alarma ya activa (fuente: ${appState.alarmSource}), ignorando disparo desde ${source}`);
+        // Prevenir doble disparo si ya está sonando
+        if (appState.isAlarmPlaying) {
+            logActivity(`⚠️ Alarma ya activa, ignorando disparo desde ${source}`);
             return;
         }
 
-        // 🔧 Permitir alarma si es la primera vez O han pasado al menos 2 minutos desde la última
-        if (!appState.pauseAlarmTriggered || timeSinceLastAlarm > 2 * 60 * 1000) {
-            // 🐛 FIX #2: Marcar flags DENTRO del check, después de validar
+        // Permitir alarma si no se ha disparado o han pasado al menos 5 minutos
+        if (!appState.pauseAlarmTriggered || timeSinceLastAlarm > 5 * 60 * 1000) {
             appState.pauseAlarmTriggered = true;
             appState.isAlarmPlaying = true;
             appState.lastAlarmTime = now;
@@ -1353,39 +1391,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             logActivity(`🔔 Alarma activada desde: ${source}`);
 
-            // 🐛 FIX #4: Si la alarma local se activa, cancelar timeout del Service Worker
-            if (source === 'local' || source === 'init') {
-                cancelScheduledNotification();
-                // Notificar al Service Worker para que cancele su timeout también
-                if (!isNativeApp && 'serviceWorker' in navigator) {
-                    navigator.serviceWorker.ready.then(registration => {
-                        registration.active.postMessage({
-                            type: 'ALARM_ALREADY_TRIGGERED'
-                        });
-                    });
-                }
-            }
-
-            // 🚨 ALARMA MEJORADA - MÁS PERSISTENTE
-
-            // 1. Vibración más fuerte y más larga
+            // 1. Vibración
             if ('vibrate' in navigator) {
-                navigator.vibrate([1000, 300, 1000, 300, 1000, 300, 1000]);
+                navigator.vibrate([1000, 300, 1000, 300, 1000]);
             }
 
-            // 2. So d'alarma d'alta intensitat (fitxer alarm.wav a través d'HTML5 Audio)
+            // 2. Reproduir so d'alarma
             playAlarmAudio(pauseType);
 
-            // Beeps auxiliars de suport
-            for (let i = 0; i < 3; i++) {
-                setTimeout(() => {
-                    createBeepSound('strong');
-                }, i * 1000);
-            }
-
-            // 3. Notificación del sistema inmediata
-            if (Notification.permission === 'granted') {
-                const timeText = pauseType === 'esmorçar' ? '15 minutos' : '30 minutos';
+            // 3. Notificación web si no es nativa
+            if (!isNativeApp && Notification.permission === 'granted') {
+                const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
                 new Notification('⏰ Temps de pausa completat!', {
                     body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
                     icon: '/icon-192.svg',
@@ -1396,69 +1412,54 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             }
 
-            // 4. Mostrar notificació visual persistent amb botó per silenciar el soroll
-            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            dom.infoMessage.innerHTML = `
-                <div>🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!</div>
-                <button id="btn-silence-alarm" style="margin-top:12px; padding:10px 20px; background:#e74c3c; color:white; border:2px solid #ffffff; border-radius:10px; font-weight:700; cursor:pointer; font-size:15px; box-shadow:0 4px 12px rgba(231,76,60,0.5); display:inline-flex; align-items:center; gap:8px;">
-                    🔕 Aturar Soroll / Silenciar Alarma
-                </button>
-            `;
-            dom.infoMessage.classList.remove('success');
-            dom.infoMessage.classList.add('alert');
-
-            const btnSilence = document.getElementById('btn-silence-alarm');
-            if (btnSilence) {
-                btnSilence.onclick = (e) => {
-                    e.stopPropagation();
-                    stopAlarm();
-                    dom.infoMessage.innerHTML = `<div>🚨 TEMPS DE ${pauseType.toUpperCase()} COMPLETAT (${timeText}) - TORNA A LA JORNADA!</div>`;
-                    dom.infoMessage.classList.add('alert');
-                    logActivity('🔕 Alarma silenciada per l\'usuari');
-                };
-            }
-
-            logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
-
-            // 🚨 BUG FIX #1: Limpiar intervalo anterior ANTES de crear uno nuevo
-            if (alarmIntervalGlobal) {
-                clearInterval(alarmIntervalGlobal);
-                alarmIntervalGlobal = null;
-            }
-
-            // 5. Repetir alarma cada 30 segundos hasta que vuelva
-            alarmIntervalGlobal = setInterval(() => {
-                if (appState.currentState === 'PAUSA' && appState.isAlarmPlaying) {
-                    playAlarmAudio(pauseType);
-                    createBeepSound('strong');
-                    if ('vibrate' in navigator) {
-                        navigator.vibrate([500, 200, 500]);
-                    }
-                    logActivity(`🔔 Recordatori: Temps de ${pauseType} completat`);
-                } else {
-                    clearInterval(alarmIntervalGlobal);
-                    alarmIntervalGlobal = null;
+            // 4. Mostrar banner d'alarma prominent amb botó per aturar el so
+            const alarmBanner = document.getElementById('alarm-banner');
+            if (alarmBanner) {
+                alarmBanner.style.display = 'flex';
+                const subElem = document.getElementById('alarm-banner-sub');
+                if (subElem) {
+                    const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+                    subElem.textContent = `Temps de ${pauseType} completat (${timeText}). Prem el botó per silenciar el timbre.`;
                 }
-            }, 30000); // Cada 30 segundos
-        } else {
-            logActivity(`⚠️ Alarma throttled: Solo ${Math.round(timeSinceLastAlarm/1000)}s desde última alarma`);
+                const btnStopBanner = document.getElementById('btn-stop-alarm-banner');
+                if (btnStopBanner) {
+                    btnStopBanner.onclick = (e) => {
+                        e.stopPropagation();
+                        stopAlarm();
+                        logActivity('🔕 Alarma silenciada des del botó de l\'app');
+                    };
+                }
+            }
+
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
         }
     }
 
     function stopAlarm() {
         stopAlarmAudio();
+        cancelScheduledNotification(); // Treu la notificació de la safata de notificacions
         appState.isAlarmPlaying = false;
-        appState.alarmSource = null; // 🐛 FIX: Resetear fuente de alarma
+        appState.alarmSource = null;
 
-        // 🚨 BUG FIX #1: Limpiar intervalo global de alarma
         if (alarmIntervalGlobal) {
             clearInterval(alarmIntervalGlobal);
             alarmIntervalGlobal = null;
         }
 
+        const alarmBanner = document.getElementById('alarm-banner');
+        if (alarmBanner) {
+            alarmBanner.style.display = 'none';
+        }
+
         const btnSilence = document.getElementById('btn-silence-alarm');
         if (btnSilence) {
             btnSilence.remove();
+        }
+
+        if (dom.infoMessage && dom.infoMessage.classList.contains('alert')) {
+            dom.infoMessage.classList.remove('alert');
+            dom.infoMessage.innerHTML = '';
         }
     }
 
@@ -1489,13 +1490,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 workDuration -= currentPauseDuration; // Restar la pausa actual que aún no está en el total
                 dom.pauseTimer.textContent = formatTime(currentPauseDuration);
 
-                // Control de alarma según el tipo de pausa
+                // Control de alarma según el tipo de pausa: només si l'app està oberta i és el moment exacte
                 if (appState.currentPauseType && PAUSE_LIMITS[appState.currentPauseType]) {
                     const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
-                    if (currentPauseDuration >= pauseLimit) {
-                        // 🚨 BUG FIX #5: Solo llamar alarma si NO está sonando ya
-                        if (!appState.isAlarmPlaying) {
-                            playPauseAlarm(appState.currentPauseType);
+                    // Finestra estricta de 3 segons per no sonar retroactivament si s'obre més tard
+                    if (currentPauseDuration >= pauseLimit && currentPauseDuration < pauseLimit + 3000) {
+                        if (!appState.isAlarmPlaying && !appState.pauseAlarmTriggered) {
+                            playPauseAlarm(appState.currentPauseType, 'timer-limit');
                         }
                     }
                 }
@@ -1778,13 +1779,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return true;
                 }
                 
-                // Si la pausa porta més de 2 hores (probable error)
+                // Si la pausa porta més d'1 hora (probable oblit o error d'aplicació)
                 const pauseStart = new Date(appState.currentPauseStart);
                 const pauseDuration = new Date() - pauseStart;
-                if (pauseDuration > 2 * 60 * 60 * 1000) { // 2 hores
-                    logActivity('⚠️ Pausa excessivament llarga detectada (>2h)');
-                    // Afegir pausa al total i resetar
-                    appState.totalPauseTimeToday += pauseDuration;
+                if (pauseDuration > 60 * 60 * 1000) { // 1 hora
+                    logActivity('⚠️ Pausa excessivament llarga detectada (>1h)');
+                    // Limitar la pausa al màxim previst (15 min esmorzar o 30 min dinar) en lloc d'afegir hores senceres
+                    const maxAllowedMs = PAUSE_LIMITS[appState.currentPauseType] || (15 * 60 * 1000);
+                    appState.totalPauseTimeToday += maxAllowedMs;
                     appState.currentState = 'JORNADA';
                     appState.currentPauseStart = null;
                     appState.currentPauseType = null;
@@ -1792,7 +1794,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     appState.pauseAlarmTriggered = false;
                     saveState();
                     updateUI();
-                    logActivity('🔧 Auto-correcció: Pausa de 2h afegida al total');
+                    logActivity(`🔧 Auto-correcció: Pausa tancada automàticament (computada a ${Math.round(maxAllowedMs / 60000)} min per evitar desfasaments)`);
                     return true;
                 }
             }
@@ -1868,8 +1870,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     await scheduleNotification(appState.currentPauseType, remaining);
                     logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
                 } else {
-                    // Ya ha pasado el tiempo, activar alarma
-                    playPauseAlarm(appState.currentPauseType, 'init');
+                    // Si el temps de pausa ja ha passat fa estona, NO activar alarma sonora en iniciar l'app
+                    logActivity(`ℹ️ La pausa de ${appState.currentPauseType} ja ha superat el temps previst (${timeText}).`);
                 }
             }
         }
@@ -1941,14 +1943,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } else {
                 logActivity('📱 App en primer pla');
-                // Comprovar si el temps de pausa ha vençut mentre l'app estava en segon pla
-                if (appState.currentState === 'PAUSA' && appState.currentPauseStart && appState.currentPauseType) {
-                    const elapsed = new Date() - appState.currentPauseStart;
-                    const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
-                    if (elapsed >= pauseLimit) {
-                        playPauseAlarm(appState.currentPauseType, 'foreground-return');
-                    }
-                }
+                // ELIMINAT: No disparar alarma en tornar al primer pla (foreground-return)
+                // L'alarma només sona mitjançant el sistema de notificacions a la seva hora exacta.
                 updateTimers();
             }
         });

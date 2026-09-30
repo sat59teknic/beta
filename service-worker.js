@@ -1,4 +1,4 @@
-const CACHE_NAME = 'beta10-v5-design-refresh';
+const CACHE_NAME = 'beta10-v6-pause-alarm-fix';
 const urlsToCache = [
     '/',
     '/index.html',

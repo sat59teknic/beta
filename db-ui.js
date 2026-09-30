@@ -449,15 +449,19 @@ class Beta10DBUI {
         let listHtml = jornadas.map(j => {
             const [y, m, d] = j.date.split('-');
             const formattedDate = `${d}/${m}/${y}`;
+            const isAnomalousPause = j.pause_minutes > 60;
 
             return `
-                <div class="db-jornada-card">
+                <div class="db-jornada-card" data-jornada-id="${j.id}">
                     <div class="db-jornada-header">
                         <div>
                             <strong>${formattedDate}</strong>
                             <span class="db-jornada-type-badge">${j.type || 'JORNADA'}</span>
                         </div>
-                        ${j.extra_hours > 0 ? `<span class="db-extra-badge">+${formatHoursMin(j.extra_hours)} extra</span>` : '<span class="db-normal-badge">Habitual</span>'}
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            ${j.extra_hours > 0 ? `<span class="db-extra-badge">+${formatHoursMin(j.extra_hours)} extra</span>` : '<span class="db-normal-badge">Habitual</span>'}
+                            <button class="db-btn-delete-jornada" data-id="${j.id}" title="Eliminar registre" style="background:none; border:none; color:#ef4444; font-size:14px; cursor:pointer; padding:2px 6px;">🗑️</button>
+                        </div>
                     </div>
                     <div class="db-jornada-body">
                         <div class="db-j-metric">
@@ -466,13 +470,21 @@ class Beta10DBUI {
                         </div>
                         <div class="db-j-metric">
                             <span class="db-j-label">Treballat</span>
-                            <span class="db-j-val">${formatHoursMin(j.worked_hours)}</span>
+                            <span class="db-j-val" id="val-worked-${j.id}">${formatHoursMin(j.worked_hours)}</span>
                         </div>
                         <div class="db-j-metric">
                             <span class="db-j-label">Pauses</span>
-                            <span class="db-j-val">${Math.round(j.pause_minutes)}m</span>
+                            <span class="db-j-val ${isAnomalousPause ? 'val-anomalous' : ''}" id="val-pause-${j.id}">${Math.round(j.pause_minutes)}m</span>
                         </div>
                     </div>
+                    ${isAnomalousPause ? `
+                        <div style="margin: 8px 0; padding: 8px 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                            <span style="font-size: 12px; color: #fca5a5;">⚠️ Pausa excessiva (${Math.round(j.pause_minutes)}m detectats per error de xarxa)</span>
+                            <button class="btn-fix-pause" data-id="${j.id}" data-worked="${j.worked_hours}" data-pause="${j.pause_minutes}" style="padding: 4px 10px; background: #22c55e; color: white; border: none; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;">
+                                🔧 Corregir a 15 min d'esmorzar
+                            </button>
+                        </div>
+                    ` : ''}
                     ${j.observations ? `
                         <div class="db-ot-comment">
                             <span class="db-comment-icon">💬</span>
@@ -494,6 +506,40 @@ class Beta10DBUI {
                 </div>
             </div>
         `;
+
+        // Listeners per corregir pauses anòmales (ex: 191m)
+        container.querySelectorAll('.btn-fix-pause').forEach(btn => {
+            btn.onclick = async () => {
+                const id = btn.getAttribute('data-id');
+                const oldWorked = parseFloat(btn.getAttribute('data-worked')) || 0;
+                const oldPause = parseFloat(btn.getAttribute('data-pause')) || 0;
+                const targetPause = 15; // 15 minuts d'esmorzar habitual
+                const diffMinutes = Math.max(0, oldPause - targetPause);
+                const newWorked = Math.round((oldWorked + (diffMinutes / 60)) * 100) / 100;
+
+                if (confirm(`Vols corregir aquesta jornada?\n\n- Pausa: de ${Math.round(oldPause)}m a ${targetPause}m\n- Treballat: de ${formatHoursMin(oldWorked)} a ${formatHoursMin(newWorked)}`)) {
+                    await window.beta10DB.updateJornada(id, {
+                        worked_hours: newWorked,
+                        extra_hours: 0,
+                        pause_minutes: targetPause,
+                        observations: '[Corregit desajust de xarxa a 15m pausa]'
+                    });
+                    await this.renderActiveTab();
+                }
+            };
+        });
+
+        // Listeners per eliminar jornades
+        container.querySelectorAll('.db-btn-delete-jornada').forEach(btn => {
+            btn.onclick = async () => {
+                const id = btn.getAttribute('data-id');
+                if (confirm('Segur que vols eliminar aquest registre de jornada de SQLite?')) {
+                    await window.beta10DB.deleteJornada(id);
+                    await this.renderActiveTab();
+                }
+            };
+        });
+
     }
 
     /**

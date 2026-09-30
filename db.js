@@ -240,6 +240,47 @@ class Beta10Database {
         console.log(`💾 SQLite: Jornada registrada (${d}: ${wrkH}h treballades, ${extH}h extra)`);
     }
 
+    /**
+     * Actualitza manualment una jornada existent (per a corregir anomalies com 191m de pausa)
+     */
+    async updateJornada(id, { worked_hours, extra_hours, pause_minutes, observations }) {
+        await this.init();
+        const sql = `
+            UPDATE jornadas 
+            SET worked_hours = ?, extra_hours = ?, pause_minutes = ?, observations = ?
+            WHERE id = ?;
+        `;
+        this.db.run(sql, [
+            Math.round(Number(worked_hours) * 100) / 100,
+            Math.round(Number(extra_hours) * 100) / 100,
+            Math.round(Number(pause_minutes) * 10) / 10,
+            observations || '',
+            id
+        ]);
+        await this.persist();
+        console.log(`💾 SQLite: Jornada #${id} actualitzada`);
+    }
+
+    /**
+     * Elimina una jornada per ID
+     */
+    async deleteJornada(id) {
+        await this.init();
+        this.db.run("DELETE FROM jornadas WHERE id = ?;", [id]);
+        await this.persist();
+        console.log(`💾 SQLite: Jornada #${id} eliminada`);
+    }
+
+    /**
+     * Elimina una pausa per ID
+     */
+    async deletePausa(id) {
+        await this.init();
+        this.db.run("DELETE FROM pausas WHERE id = ?;", [id]);
+        await this.persist();
+        console.log(`💾 SQLite: Pausa #${id} eliminada`);
+    }
+
     // ==========================================
     // CONSULTES PER A LA UI
     // ==========================================
