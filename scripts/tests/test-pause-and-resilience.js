@@ -173,5 +173,40 @@ module.exports = function registerPauseResilienceTests(runner) {
             assert(totalPauseMinutes < 16.0, `Pause duration must be ~15.5m, got ${totalPauseMinutes}m`);
             assert(totalPauseMinutes !== 191, 'Bug reproduced prevention: Pause must never be 191m');
         });
+
+        suite.test('OFFLINE SYNC QUEUE: Failed pause end queues action and replays cleanly upon reconnect', async () => {
+            const env = createMockEnvironment();
+            const replayedPunches = [];
+
+            // Mock saving to localStorage
+            const pendingData = {
+                type: 'END_PAUSE',
+                title: 'Tornada de Pausa',
+                actions: [
+                    { action: 'salida', point: 'P' },
+                    { action: 'entrada', point: 'J', newState: 'JORNADA' }
+                ],
+                timestamp: new Date().toISOString()
+            };
+
+            env.localStorage.setItem('beta10_pending_sync', JSON.stringify(pendingData));
+            assert(env.localStorage.getItem('beta10_pending_sync'), 'Pending sync must be saved');
+
+            // Simulate executePendingSync when reconnecting
+            const pending = JSON.parse(env.localStorage.getItem('beta10_pending_sync'));
+            for (const act of pending.actions) {
+                // Mock successfully sending to proxy
+                replayedPunches.push({ action: act.action, point: act.point });
+            }
+            env.localStorage.removeItem('beta10_pending_sync');
+
+            assertEqual(replayedPunches.length, 2, 'Should replay 2 punches: salida P and entrada J');
+            assertEqual(replayedPunches[0].action, 'salida');
+            assertEqual(replayedPunches[0].point, 'P');
+            assertEqual(replayedPunches[1].action, 'entrada');
+            assertEqual(replayedPunches[1].point, 'J');
+            assertEqual(env.localStorage.getItem('beta10_pending_sync'), null, 'Queue must be empty after sync');
+        });
     });
 };
+

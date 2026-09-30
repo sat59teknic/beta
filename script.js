@@ -541,6 +541,106 @@ document.addEventListener('DOMContentLoaded', async () => {
         header.insertBefore(accountBtn, gpsStatus);
     }
 
+    // --- GESTIÓ DE SINCRONITZACIÓ PENDENT (OFFLINE RETRY MANAGER) ---
+    const PENDING_SYNC_KEY = 'beta10_pending_sync';
+
+    function getPendingSync() {
+        try {
+            const raw = localStorage.getItem(PENDING_SYNC_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function savePendingSync(data) {
+        try {
+            localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(data));
+            renderPendingSyncBanner();
+        } catch (e) {}
+    }
+
+    function clearPendingSync() {
+        try {
+            localStorage.removeItem(PENDING_SYNC_KEY);
+            renderPendingSyncBanner();
+        } catch (e) {}
+    }
+
+    function renderPendingSyncBanner() {
+        let banner = document.getElementById('pending-sync-banner');
+        const pending = getPendingSync();
+
+        if (!pending) {
+            if (banner) banner.style.display = 'none';
+            return;
+        }
+
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'pending-sync-banner';
+            banner.className = 'pending-sync-banner';
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent) {
+                mainContent.insertBefore(banner, mainContent.firstChild);
+            }
+        }
+
+        banner.style.display = 'flex';
+        banner.innerHTML = `
+            <div class="pending-sync-info">
+                <span class="pending-sync-icon">📡</span>
+                <div class="pending-sync-text">
+                    <strong>Fitxatge pendent de sincronitzar</strong>
+                    <span>${pending.title || 'Tornada de Pausa'} (sense cobertura quan es va prémer)</span>
+                </div>
+            </div>
+            <button id="btn-retry-pending-sync" class="btn-retry-sync" type="button">
+                🔄 Reintentar
+            </button>
+        `;
+
+        const btnRetry = document.getElementById('btn-retry-pending-sync');
+        if (btnRetry) {
+            btnRetry.onclick = async (e) => {
+                e.stopPropagation();
+                await executePendingSync();
+            };
+        }
+    }
+
+    async function executePendingSync() {
+        const pending = getPendingSync();
+        if (!pending || !pending.actions) return;
+
+        showLoading(true, 'Sincronitzant fitxatges pendents...');
+        logActivity('🔄 Intentant sincronitzar fitxatges pendents amb Beta10...');
+
+        try {
+            await getCurrentLocation();
+            for (const act of pending.actions) {
+                await sendToProxy(act.action, act.point, act.observations || '');
+            }
+            clearPendingSync();
+            logActivity('✅ Fitxatges pendents sincronitzats correctament amb Beta10');
+            if (dom.infoMessage) {
+                dom.infoMessage.textContent = '✅ Sincronització amb Beta10 completada';
+                dom.infoMessage.className = 'info-message success';
+                setTimeout(() => {
+                    if (dom.infoMessage.textContent.includes('Sincronització')) {
+                        dom.infoMessage.textContent = '';
+                        dom.infoMessage.className = 'info-message';
+                    }
+                }, 4000);
+            }
+        } catch (err) {
+            logActivity(`⚠️ Encara sense connexió amb Beta10: ${err.message}`);
+            showTranslatedError(err);
+        } finally {
+            showLoading(false);
+        }
+    }
+
     async function sendToProxy(action, point, observations = '') {
         if (!appState.currentLocation) {
             const error = new Error('Ubicació GPS no disponible.');
@@ -704,6 +804,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             showTranslatedError(error);
             showLoading(false);
+            throw error;
         }
     }
 
@@ -897,8 +998,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 { action: 'salida', point: 'P' },
                 { action: 'entrada', point: 'J', newState: 'JORNADA' }
             ]);
+            clearPendingSync();
         } catch (error) {
             logActivity(`⚠️ Error xarxa fitxant tornada de pausa a Beta10: ${error.message}. El temps de pausa local ja s'ha aturat.`);
+            savePendingSync({
+                type: 'END_PAUSE',
+                title: 'Tornada de Pausa',
+                actions: [
+                    { action: 'salida', point: 'P' },
+                    { action: 'entrada', point: 'J', newState: 'JORNADA' }
+                ],
+                timestamp: now.toISOString()
+            });
             showTranslatedError(error);
         }
     }
@@ -1883,6 +1994,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         updateUI();
+        renderPendingSyncBanner();
+
+        window.addEventListener('online', () => {
+            logActivity('📶 Connexió a Internet restablerta');
+            if (getPendingSync()) {
+                executePendingSync();
+            }
+        });
         
         // Actualizar timers cada segundo
         setInterval(() => {
