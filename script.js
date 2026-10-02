@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentStateText: document.getElementById('current-state-text'),
         workTimer: document.getElementById('work-timer'),
         pauseTimer: document.getElementById('pause-timer'),
+        totalTimer: document.getElementById('total-timer'),
         buttonContainer: document.getElementById('button-container'),
         logContainer: document.getElementById('log-container'),
         loadingOverlay: document.getElementById('loading-overlay'),
@@ -886,11 +887,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         ], obs);
     }
 
-    // Funció modificada per iniciar pausa (Esmorzar 15 min / Dinar 30 min)
-    async function startPause() {
+    // Funció per iniciar pausa directa (Esmorzar 15 min / Dinar 30 min) o via modal
+    async function startPause(type = null) {
         try {
-            const pauseType = await showPauseTypeModal();
+            const pauseType = type || await showPauseTypeModal();
             if (!pauseType) return; // Usuari cancel·la
+
+            // Validar que no es repeteixi l'esmorzar en el mateix dia
+            if (pauseType === 'esmorçar') {
+                const todayStr = getLocalDateString(new Date());
+                if (appState.breakfastDate === todayStr) {
+                    dom.infoMessage.textContent = '🔒 L\'esmorzar ja ha estat realitzat avui (només disponible Dinar)';
+                    dom.infoMessage.classList.add('alert');
+                    logActivity('⚠️ Intent d\'iniciar un segon esmorzar rebutjat');
+                    return;
+                }
+            }
             
             await getCurrentLocation();
             
@@ -1589,6 +1601,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (appState.currentState === 'FUERA') {
             dom.workTimer.textContent = '00:00:00';
             dom.pauseTimer.textContent = '00:00:00';
+            if (dom.totalTimer) dom.totalTimer.textContent = '00:00:00';
             return;
         }
 
@@ -1616,6 +1629,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 dom.pauseTimer.textContent = formatTime(appState.totalPauseTimeToday);
             }
             dom.workTimer.textContent = formatTime(workDuration);
+
+            // Total transcorregut de jornada (treball efectiu + pauses)
+            if (dom.totalTimer) {
+                const totalDuration = Math.max(0, now - appState.workStartTime);
+                dom.totalTimer.textContent = formatTime(totalDuration);
+            }
         }
     }
     
@@ -1634,14 +1653,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 toast = document.createElement('div');
                 toast.id = 'hold-quick-tap-toast';
                 toast.className = 'hold-quick-tap-toast';
-                toast.textContent = '⏱️ Mantingues premut 2 segons per activar';
+                toast.textContent = '⏱️ Mantingues premut 1 segon per activar';
                 document.body.appendChild(toast);
             }
             toast.classList.add('show');
             if (window._quickToastTimeout) clearTimeout(window._quickToastTimeout);
             window._quickToastTimeout = setTimeout(() => {
                 toast.classList.remove('show');
-            }, 1800);
+            }, 1500);
         };
 
         const createButton = (text, className, action, disabled = false) => {
@@ -1653,7 +1672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="btn-hold-progress"></div>
                 <div class="btn-content-wrap">
                     <span class="btn-main-text">${text}</span>
-                    <span class="btn-hold-timer-tag">Prem 2s</span>
+                    <span class="btn-hold-timer-tag">Prem 1s</span>
                 </div>
             `;
 
@@ -1697,7 +1716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                     // Execució intencionada de l'acció
                     action();
-                }, 2000);
+                }, 1000);
             };
 
             const cancelHold = (e) => {
@@ -1711,8 +1730,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     holdTimer = null;
                 }
 
-                // Si ha estat una pulsació massa ràpida (menys de 2s)
-                if (elapsed < 1900 && elapsed > 40) {
+                // Si ha estat una pulsació massa ràpida (menys d'1s)
+                if (elapsed < 900 && elapsed > 40) {
                     showQuickTapToast();
                 }
             };
@@ -1726,9 +1745,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             return btn;
         };
 
-        const createPair = (btn1, btn2) => {
+        const createPair = (btn1, btn2, isEqual = false) => {
             const row = document.createElement('div');
-            row.className = 'btn-pair';
+            row.className = isEqual ? 'btn-pair btn-pair-equal' : 'btn-pair';
             row.appendChild(btn1);
             row.appendChild(btn2);
             dom.buttonContainer.appendChild(row);
@@ -1737,7 +1756,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Indicador visual superior
         const hint = document.createElement('div');
         hint.className = 'hold-info-hint';
-        hint.innerHTML = '<span>🔒</span> Mantén 2s qualsevol botó per confirmar';
+        hint.innerHTML = '<span>🔒</span> Mantén 1s qualsevol botó per confirmar';
         dom.buttonContainer.appendChild(hint);
 
         switch (appState.currentState) {
@@ -1767,17 +1786,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                 );
                 break;
 
-            case 'JORNADA':
-                // Botó de Pausa
-                dom.buttonContainer.appendChild(
-                    createButton('⏸️ Iniciar Pausa', 'btn-pause', startPause)
+            case 'JORNADA': {
+                const todayStr = getLocalDateString(new Date());
+                const breakfastDone = appState.breakfastDate === todayStr;
+
+                // 2 botons directes de Pausa: Esmorçar (15m) i Dinar (30m)
+                createPair(
+                    createButton(
+                        breakfastDone ? '🥐 Esmorzar (Fet)' : '🥐 Esmorzar (15m)',
+                        'btn-pause-breakfast',
+                        breakfastDone ? () => {
+                            dom.infoMessage.textContent = '🔒 L\'esmorzar ja ha estat realitzat avui';
+                            dom.infoMessage.classList.add('alert');
+                        } : () => startPause('esmorçar'),
+                        breakfastDone
+                    ),
+                    createButton('🍽️ Dinar (30m)', 'btn-pause-lunch', () => startPause('dinar')),
+                    true
                 );
+
                 // 2 botons per finalitzar jornada (habitual i amb comentari)
                 createPair(
                     createButton('⛔ Finalitzar Jornada', 'btn-stop', () => endWorkday(false)),
                     createButton('💬 Finalitzar + Obs', 'btn-stop-obs', () => endWorkday(true))
                 );
                 break;
+            }
 
             case 'PAUSA':
                 const pauseTypeText = appState.currentPauseType === 'esmorçar' ? ' (15 min)' : (appState.currentPauseType === 'dinar' ? ' (30 min)' : '');
@@ -1845,6 +1879,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const liveText = liveBadge ? liveBadge.querySelector('.status-live-text') : null;
         const workBox = document.getElementById('work-timer-box');
         const pauseBox = document.getElementById('pause-timer-box');
+        const totalBox = document.getElementById('total-timer-box');
 
         if (statusCard) {
             statusCard.className = `status-card state-${appState.currentState.toLowerCase()}`;
@@ -1858,6 +1893,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (workBox && pauseBox) {
             workBox.classList.toggle('timer-active', appState.currentState === 'JORNADA' || appState.currentState === 'ALMACEN');
             pauseBox.classList.toggle('timer-active', appState.currentState === 'PAUSA');
+            if (totalBox) {
+                totalBox.classList.toggle('timer-active', appState.currentState !== 'FUERA');
+            }
         }
 
         const pauseLabelElem = document.getElementById('pause-timer-label');

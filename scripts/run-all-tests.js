@@ -21,6 +21,7 @@ async function main() {
     require('./tests/test-pause-and-resilience.js')(runner);
     require('./tests/test-alarm-and-notifications.js')(runner);
     require('./tests/test-autocorrection-and-ui.js')(runner);
+    require('./tests/test-buttons-and-timers.js')(runner);
 
     // Run suites
     await runner.run();
