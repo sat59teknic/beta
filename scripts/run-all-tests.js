@@ -22,6 +22,7 @@ async function main() {
     require('./tests/test-alarm-and-notifications.js')(runner);
     require('./tests/test-autocorrection-and-ui.js')(runner);
     require('./tests/test-buttons-and-timers.js')(runner);
+    require('./tests/test-whatsapp-modal-and-dual-stats.js')(runner);
 
     // Run suites
     await runner.run();

@@ -2432,6 +2432,198 @@ textarea:focus-visible {
     transform: scale(0.95);
 }
 
+/* ==========================================================================
+   📱 MODAL RECORDATORI DE WHATSAPP AL FINAL DE LA JORNADA
+   ========================================================================== */
+.whatsapp-modal-overlay {
+    z-index: 10005;
+}
 
+.whatsapp-modal-content {
+    text-align: center;
+    max-width: 380px;
+    padding: 24px 20px;
+    border-radius: 20px;
+    border: 1px solid rgba(37, 211, 102, 0.3);
+    background: var(--card-bg-color);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35), 0 0 24px rgba(37, 211, 102, 0.18);
+    animation: modalFadeIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
 
+.whatsapp-icon-container {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 16px auto;
+    border-radius: 50%;
+    background: rgba(37, 211, 102, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(37, 211, 102, 0.25);
+}
 
+.whatsapp-modal-svg {
+    filter: drop-shadow(0 2px 4px rgba(37, 211, 102, 0.4));
+}
+
+.whatsapp-modal-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-color);
+    margin: 0 0 10px 0;
+}
+
+.whatsapp-modal-message {
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text-color);
+    margin: 0 0 22px 0;
+    padding: 10px 14px;
+    background: rgba(37, 211, 102, 0.08);
+    border-radius: 12px;
+    border-left: 4px solid #25D366;
+    font-weight: 600;
+}
+
+.whatsapp-modal-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.btn-whatsapp {
+    background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(37, 211, 102, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-whatsapp:active {
+    transform: scale(0.97);
+}
+
+/* ==========================================================================
+   📊 SECCIÓ D'HORES EXTRA DUAL: TREBALLADES vs REMUNERADES
+   ========================================================================== */
+.db-highlight-dual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+@media (max-width: 520px) {
+    .db-highlight-dual-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.db-highlight-card.worked-card {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border: 2px solid #3b82f6;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.db-highlight-card.worked-card .db-highlight-label {
+    color: #1e40af;
+}
+
+.db-highlight-number.worked-num {
+    color: #1d4ed8;
+}
+
+.db-highlight-card.remunerated-card {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    border: 2px solid #10b981;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.18);
+}
+
+.db-highlight-card.remunerated-card .db-highlight-label {
+    color: #065f46;
+}
+
+.db-highlight-number.remunerated-num {
+    color: #047857;
+}
+
+.db-highlight-subnote {
+    display: block;
+    font-size: 11px;
+    margin-top: 4px;
+    opacity: 0.85;
+    font-weight: 500;
+}
+
+.remunerated-badge {
+    background: #10b981 !important;
+    color: #ffffff !important;
+    font-weight: 700;
+}
+
+.db-rule-info-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.035);
+    border: 1px dashed var(--gray-dark);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--subtle-text-color);
+}
+
+.db-info-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.db-rule-info-card p {
+    margin: 0;
+}
+
+.highlight-paid {
+    color: #059669;
+    font-weight: 800;
+}
+
+.unremunerated-tag {
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.db-extra-badge.paid {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #ffffff;
+}
+
+.db-extra-badge.unpaid {
+    background: #6b7280;
+    color: #ffffff;
+    opacity: 0.75;
+}
+
+.cal-ot-badge.cal-paid {
+    background: #10b981;
+}
+
+.cal-ot-badge.cal-unpaid {
+    background: #6b7280;
+}

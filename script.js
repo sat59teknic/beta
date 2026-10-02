@@ -441,6 +441,65 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    // 🆕 Modal recordatori de WhatsApp després de finalitzar jornada
+    function showWhatsAppReminderModal() {
+        const existing = document.getElementById('whatsapp-reminder-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay whatsapp-modal-overlay';
+        modal.id = 'whatsapp-reminder-modal';
+        modal.innerHTML = `
+            <div class="modal-content whatsapp-modal-content">
+                <div class="whatsapp-icon-container">
+                    <svg class="whatsapp-modal-svg" viewBox="0 0 448 512" width="62" height="62" fill="#25D366" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/>
+                    </svg>
+                </div>
+                <h3 class="whatsapp-modal-title">Grup de WhatsApp</h3>
+                <p class="whatsapp-modal-message">
+                    No te olvides de enviar la jornada de hoy al grupo de WhatsApp.
+                </p>
+                <div class="modal-buttons whatsapp-modal-buttons">
+                    <button type="button" class="btn btn-whatsapp" id="btn-open-whatsapp">
+                        <span>📲</span> Obrir WhatsApp
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="btn-close-whatsapp-modal">
+                        Entès / Tancar
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const closeModal = () => {
+            if (document.body.contains(modal)) {
+                document.body.removeChild(modal);
+            }
+        };
+
+        const closeBtn = modal.querySelector('#btn-close-whatsapp-modal');
+        if (closeBtn) closeBtn.onclick = closeModal;
+
+        modal.onclick = (e) => {
+            if (e.target === modal) closeModal();
+        };
+
+        const openBtn = modal.querySelector('#btn-open-whatsapp');
+        if (openBtn) {
+            openBtn.onclick = () => {
+                try {
+                    window.open('https://api.whatsapp.com/', '_blank');
+                } catch (e) {
+                    console.warn('No s\'ha pogut obrir WhatsApp directament:', e);
+                }
+                closeModal();
+            };
+        }
+    }
+    window.showWhatsAppReminderModal = showWhatsAppReminderModal;
+
     // 🆕 FUNCIONES PARA HORARIOS DINÁMICOS
     function getStandardWorkDay(date = new Date()) {
         const dayOfWeek = date.getDay(); // 0=Domingo, 1=Lunes, 5=Viernes, 6=Sábado
@@ -478,7 +537,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Detectar si son horas extra con horario dinámico
     function calculateExtraHours() {
-        if (!appState.workStartTime) return { extraHours: 0, totalHours: 0, extraBlocks: 0, standardWorkDay: 9 };
+        if (!appState.workStartTime) return { 
+            extraHours: 0, 
+            workedExtraHours: 0,
+            remuneratedExtraHours: 0,
+            totalHours: 0, 
+            extraBlocks: 0, 
+            standardWorkDay: 9 
+        };
         
         const now = new Date();
         const workDuration = now - appState.workStartTime - appState.totalPauseTimeToday;
@@ -493,33 +559,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         const totalPauseTime = (appState.totalPauseTimeToday + currentPauseDuration) / (1000 * 60 * 60);
         const totalJourneyTime = totalWorkTime + totalPauseTime; // Jornada completa
         
-        // 🆕 USAR HORARIO DINÁMICO (CORREGIDO: nullish coalescing para soportar 0)
+        // 🆕 USAR HORARIO DINÁMICO (nullish coalescing para soportar 0)
         const standardWorkDay = appState.workDayStandard ?? 9;
         const extraTime = Math.max(0, totalJourneyTime - standardWorkDay);
         
-        // 🔍 DEBUG: Log para diagnosticar problemas
-        console.log('🔍 DEBUG CALCULATE EXTRA HOURS:');
-        console.log('- workStartTime:', appState.workStartTime);
-        console.log('- totalJourneyTime:', totalJourneyTime);
-        console.log('- standardWorkDay:', standardWorkDay);
-        console.log('- workDayType:', appState.workDayType);
-        console.log('- workDayStandard:', appState.workDayStandard);
-        
-        // Solo contar como extra si es >= 30 minutos (excepto sábados)
-        let extraHours = 0;
+        // Horas extra reales trabajadas (efectivas)
+        let workedExtraHours = 0;
         if (standardWorkDay === 0) {
-            // Sábado/Domingo: todo son horas extra
-            extraHours = totalJourneyTime;
-            console.log('- Es fin de semana: extraHours =', extraHours);
+            // Fin de semana: toda la jornada computa como tiempo extra
+            workedExtraHours = totalJourneyTime;
         } else {
-            extraHours = extraTime >= 0.5 ? extraTime : 0;
-            console.log('- Día laboral: extraTime =', extraTime, ', extraHours =', extraHours);
+            workedExtraHours = extraTime;
         }
         
-        const extraBlocks = Math.floor(extraHours / 0.5); // Bloques de 30min
+        // Horas extra remuneradas: solo se computan y pagan bloques completos de 30 minutos (0.5h) por día
+        // Si es < 30 min (ej. 23 min) = 0h remuneradas
+        // Si es >= 30 min (ej. 45 min) = 0.5h remuneradas (los 15 min restantes no se pagan ni acumulan)
+        // Se reinicia cada día de forma independiente
+        const extraBlocks = Math.floor((workedExtraHours + 0.0001) / 0.5);
+        const remuneratedExtraHours = extraBlocks * 0.5;
         
         return { 
-            extraHours: extraHours, 
+            extraHours: workedExtraHours, 
+            workedExtraHours: workedExtraHours,
+            remuneratedExtraHours: remuneratedExtraHours,
             totalHours: totalJourneyTime,
             extraBlocks: extraBlocks,
             standardWorkDay: standardWorkDay
@@ -743,15 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 let extraText = '';
                 let hasOvertime = false;
 
-                if (standardWorkDay === 0) {
-                    if (extraInfo.totalHours >= 0.5) {
-                        hasOvertime = true;
-                        const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                        const hours = Math.floor(totalBlocks / 2);
-                        const mins = (totalBlocks % 2) * 30;
-                        extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
-                    }
-                } else if (extraInfo.extraHours >= 0.5) {
+                if (extraInfo.remuneratedExtraHours >= 0.5) {
                     hasOvertime = true;
                     const extraBlocks = extraInfo.extraBlocks;
                     const hours = Math.floor(extraBlocks / 2);
@@ -1037,15 +1092,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         let extraText = '';
         let hasOvertime = false;
-        if (standardWorkDay === 0) {
-            if (extraInfo.totalHours >= 0.5) {
-                hasOvertime = true;
-                const totalBlocks = Math.floor(extraInfo.totalHours / 0.5);
-                const hours = Math.floor(totalBlocks / 2);
-                const mins = (totalBlocks % 2) * 30;
-                extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
-            }
-        } else if (extraInfo.extraHours >= 0.5) {
+        if (extraInfo.remuneratedExtraHours >= 0.5) {
             hasOvertime = true;
             const extraBlocks = extraInfo.extraBlocks;
             const hours = Math.floor(extraBlocks / 2);
@@ -1123,7 +1170,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         dayType: currentDayType,
                         standardHours: currentStandardHours,
                         workedHours: workedHours,
-                        extraHours: extraInfo.extraHours || 0,
+                        extraHours: extraInfo.workedExtraHours || extraInfo.extraHours || 0,
+                        remuneratedExtraHours: extraInfo.remuneratedExtraHours || 0,
                         pauseMinutes: pauseMinutes,
                         observations: customObservations || ''
                     }).catch(e => console.warn('⚠️ Error gravant jornada a SQLite:', e));
@@ -1138,6 +1186,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 appState.workDayType = null;
                 appState.workStartDay = null;
                 stopAlarm();
+
+                // 🟢 Mostrar modal recordatori WhatsApp
+                showWhatsAppReminderModal();
             };
         }
 

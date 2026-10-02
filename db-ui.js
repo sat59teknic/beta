@@ -167,11 +167,15 @@ class Beta10DBUI {
             return `${h}h ${m}min`;
         };
 
-        let monthsOptionsHtml = monthlySummary.map(m => `
-            <option value="${m.month}" ${m.month === this.selectedMonth ? 'selected' : ''}>
-                ${formatMonthName(m.month)} (${formatHoursMin(m.total_extra_hours)})
-            </option>
-        `).join('');
+        let monthsOptionsHtml = monthlySummary.map(m => {
+            const remH = m.total_remunerated_extra_hours !== undefined ? m.total_remunerated_extra_hours : m.total_extra_hours;
+            const wrkH = m.total_worked_extra_hours !== undefined ? m.total_worked_extra_hours : m.total_extra_hours;
+            return `
+                <option value="${m.month}" ${m.month === this.selectedMonth ? 'selected' : ''}>
+                    ${formatMonthName(m.month)} (💰 ${formatHoursMin(remH)} remunerades / 🕒 ${formatHoursMin(wrkH)} reals)
+                </option>
+            `;
+        }).join('');
 
         // --- CONSTRUIR GRAELLA DE CALENDARI ---
         const [yNum, mNum] = currentMonthData.month.split('-').map(Number);
@@ -202,10 +206,15 @@ class Beta10DBUI {
             const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
 
             if (otData) {
+                const wrkExt = Number(otData.extra_hours) || 0;
+                const remExt = otData.remunerated_extra_hours !== undefined && otData.remunerated_extra_hours !== null
+                    ? Number(otData.remunerated_extra_hours)
+                    : Math.floor((wrkExt + 0.0001) / 0.5) * 0.5;
+
                 calDaysHtml += `
-                    <div class="cal-day has-overtime" data-date="${dateStr}" title="Dia ${day}: +${formatHoursMin(otData.extra_hours)}">
+                    <div class="cal-day has-overtime" data-date="${dateStr}" title="Dia ${day}: +${formatHoursMin(wrkExt)} treballades / +${formatHoursMin(remExt)} remunerades">
                         <span class="cal-date-num">${day}</span>
-                        <span class="cal-ot-badge">+${formatHoursMin(otData.extra_hours)}</span>
+                        <span class="cal-ot-badge ${remExt > 0 ? 'cal-paid' : 'cal-unpaid'}">+${formatHoursMin(remExt > 0 ? remExt : wrkExt)}</span>
                         ${otData.observations ? '<span class="cal-dot-obs">💬</span>' : ''}
                     </div>
                 `;
@@ -226,6 +235,12 @@ class Beta10DBUI {
             const [y, m, day] = d.date.split('-');
             const formattedDate = `${day}/${m}/${y}`;
 
+            const workedExtra = Number(d.extra_hours) || 0;
+            const remuneratedExtra = d.remunerated_extra_hours !== undefined && d.remunerated_extra_hours !== null
+                ? Number(d.remunerated_extra_hours)
+                : Math.floor((workedExtra + 0.0001) / 0.5) * 0.5;
+            const unremuneratedMin = Math.max(0, Math.round((workedExtra - remuneratedExtra) * 60));
+
             return `
                 <div class="db-overtime-day-card" data-card-date="${d.date}" id="card-date-${d.date}">
                     <div class="db-ot-day-header">
@@ -233,11 +248,16 @@ class Beta10DBUI {
                             <span class="db-day-badge">${dayName}</span>
                             <strong>${formattedDate}</strong>
                         </div>
-                        <span class="db-extra-badge">+${formatHoursMin(d.extra_hours)}</span>
+                        <div class="db-ot-badges-group">
+                            <span class="db-extra-badge ${remuneratedExtra > 0 ? 'paid' : 'unpaid'}">💰 +${formatHoursMin(remuneratedExtra)} pagades</span>
+                        </div>
                     </div>
                     <div class="db-ot-day-details">
-                        <span>🕒 Treballat: <b>${formatHoursMin(d.worked_hours)}</b></span>
+                        <span>🕒 Treballat total: <b>${formatHoursMin(d.worked_hours)}</b></span>
                         <span>⏱️ Estàndard: <b>${d.standard_hours}h</b></span>
+                        <span>⏳ Extra real: <b>+${formatHoursMin(workedExtra)}</b></span>
+                        <span>💵 Extra remunerat: <b class="highlight-paid">+${formatHoursMin(remuneratedExtra)}</b></span>
+                        ${unremuneratedMin > 0 ? `<span class="unremunerated-tag">⚠️ ${unremuneratedMin}m no remunerables</span>` : ''}
                         ${d.pause_minutes > 0 ? `<span>☕ Pauses: <b>${Math.round(d.pause_minutes)}m</b></span>` : ''}
                     </div>
                     ${d.observations ? `
@@ -250,6 +270,9 @@ class Beta10DBUI {
             `;
         }).join('');
 
+        const totalWorkedExtra = currentMonthData.total_worked_extra_hours ?? currentMonthData.total_extra_hours ?? 0;
+        const totalRemuneratedExtra = currentMonthData.total_remunerated_extra_hours ?? currentMonthData.total_extra_hours ?? 0;
+
         container.innerHTML = `
             <div class="db-overtime-container">
                 <div class="db-month-selector-row">
@@ -259,14 +282,34 @@ class Beta10DBUI {
                     </select>
                 </div>
 
-                <div class="db-highlight-card">
-                    <div class="db-highlight-left">
-                        <span class="db-highlight-label">TOTAL HORES EXTRA (${formatMonthName(currentMonthData.month)})</span>
-                        <h2 class="db-highlight-number">+${formatHoursMin(currentMonthData.total_extra_hours)}</h2>
+                <!-- 🆕 2 APARTATS: HORES TREBALLADES I HORES REMUNERADES -->
+                <div class="db-highlight-dual-grid">
+                    <div class="db-highlight-card worked-card">
+                        <div class="db-highlight-left">
+                            <span class="db-highlight-label">🕒 Hores Extra Treballades</span>
+                            <h2 class="db-highlight-number worked-num">+${formatHoursMin(totalWorkedExtra)}</h2>
+                            <span class="db-highlight-subnote">Temps efectiu real per sobre de la jornada</span>
+                        </div>
+                        <div class="db-highlight-right">
+                            <span class="db-badge-count">📅 ${currentMonthData.days_with_extra} dies</span>
+                        </div>
                     </div>
-                    <div class="db-highlight-right">
-                        <span class="db-badge-count">📅 ${currentMonthData.days_with_extra} dies</span>
+
+                    <div class="db-highlight-card remunerated-card">
+                        <div class="db-highlight-left">
+                            <span class="db-highlight-label">💰 Hores Remunerades</span>
+                            <h2 class="db-highlight-number remunerated-num">+${formatHoursMin(totalRemuneratedExtra)}</h2>
+                            <span class="db-highlight-subnote">Blocs de 30m diaris (no acumulable entre dies)</span>
+                        </div>
+                        <div class="db-highlight-right">
+                            <span class="db-badge-count remunerated-badge">💵 En nòmina</span>
+                        </div>
                     </div>
+                </div>
+
+                <div class="db-rule-info-card">
+                    <span class="db-info-icon">ℹ️</span>
+                    <p><strong>Criteri de remuneració:</strong> Només es paguen blocs de 30 minuts per dia (>30m: 0,5h, 45m: 0,5h, <30m: 0h). Els minuts que no completen bloc es descarten i no s'acumulen entre dies.</p>
                 </div>
 
                 <!-- 📅 CALENDARI MENSUAL D'HORES EXTRA -->

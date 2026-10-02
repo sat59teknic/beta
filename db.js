@@ -79,6 +79,7 @@ class Beta10Database {
                 standard_hours REAL DEFAULT 9,
                 worked_hours REAL NOT NULL,
                 extra_hours REAL DEFAULT 0,
+                remunerated_extra_hours REAL DEFAULT 0,
                 pause_minutes REAL DEFAULT 0,
                 observations TEXT,
                 created_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -108,6 +109,13 @@ class Beta10Database {
             );
         `;
         this.db.run(schema);
+
+        // Migració per afegir remunerated_extra_hours si s'utilitza una base de dades existent
+        try {
+            this.db.run("ALTER TABLE jornadas ADD COLUMN remunerated_extra_hours REAL DEFAULT 0;");
+        } catch (e) {
+            // La columna ja existeix
+        }
     }
 
     /**
@@ -219,6 +227,7 @@ class Beta10Database {
         standardHours = 9,
         workedHours,
         extraHours = 0,
+        remuneratedExtraHours = null,
         pauseMinutes = 0,
         observations = ''
     }) {
@@ -229,30 +238,39 @@ class Beta10Database {
         const stdH = Number(standardHours) || 0;
         const wrkH = Math.round(Number(workedHours) * 100) / 100;
         const extH = Math.round(Number(extraHours) * 100) / 100;
+        const remExtH = remuneratedExtraHours !== null && remuneratedExtraHours !== undefined
+            ? Math.round(Number(remuneratedExtraHours) * 100) / 100
+            : Math.floor((extH + 0.0001) / 0.5) * 0.5;
         const pauM = Math.round(Number(pauseMinutes) * 10) / 10;
 
         const sql = `
-            INSERT INTO jornadas (user, date, start_time, end_time, type, day_type, standard_hours, worked_hours, extra_hours, pause_minutes, observations)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            INSERT INTO jornadas (user, date, start_time, end_time, type, day_type, standard_hours, worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         `;
-        this.db.run(sql, [user, d, startIso, endIso, type, dayType, stdH, wrkH, extH, pauM, observations || '']);
+        this.db.run(sql, [user, d, startIso, endIso, type, dayType, stdH, wrkH, extH, remExtH, pauM, observations || '']);
         await this.persist();
-        console.log(`💾 SQLite: Jornada registrada (${d}: ${wrkH}h treballades, ${extH}h extra)`);
+        console.log(`💾 SQLite: Jornada registrada (${d}: ${wrkH}h treballades, ${extH}h extra real, ${remExtH}h extra remunerades)`);
     }
 
     /**
      * Actualitza manualment una jornada existent (per a corregir anomalies com 191m de pausa)
      */
-    async updateJornada(id, { worked_hours, extra_hours, pause_minutes, observations }) {
+    async updateJornada(id, { worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations }) {
         await this.init();
+        const extH = Math.round(Number(extra_hours) * 100) / 100;
+        const remH = remunerated_extra_hours !== undefined && remunerated_extra_hours !== null
+            ? Math.round(Number(remunerated_extra_hours) * 100) / 100
+            : Math.floor((extH + 0.0001) / 0.5) * 0.5;
+
         const sql = `
             UPDATE jornadas 
-            SET worked_hours = ?, extra_hours = ?, pause_minutes = ?, observations = ?
+            SET worked_hours = ?, extra_hours = ?, remunerated_extra_hours = ?, pause_minutes = ?, observations = ?
             WHERE id = ?;
         `;
         this.db.run(sql, [
             Math.round(Number(worked_hours) * 100) / 100,
-            Math.round(Number(extra_hours) * 100) / 100,
+            extH,
+            remH,
             Math.round(Number(pause_minutes) * 10) / 10,
             observations || '',
             id
@@ -287,13 +305,17 @@ class Beta10Database {
 
     /**
      * Retorna el resum d'hores extra agrupades per mes
+     * Diferencia entre hores extra treballades (totals reals) i hores extra remunerades (blocs de 30 min per dia)
      */
     async getMonthlyOvertimeSummary() {
         await this.init();
         const sql = `
             SELECT 
                 strftime('%Y-%m', date) as month,
+                ROUND(SUM(extra_hours), 2) as total_worked_extra_hours,
+                ROUND(SUM(COALESCE(remunerated_extra_hours, CAST(((extra_hours + 0.0001) / 0.5) AS INT) * 0.5)), 2) as total_remunerated_extra_hours,
                 ROUND(SUM(extra_hours), 2) as total_extra_hours,
+                ROUND(SUM(worked_hours), 2) as total_worked_hours,
                 COUNT(*) as days_with_extra
             FROM jornadas 
             WHERE extra_hours > 0 
