@@ -468,6 +468,33 @@ class Beta10Database {
         URL.revokeObjectURL(url);
     }
 
+    /**
+     * Importa i restaura una base de dades SQLite des d'un ArrayBuffer (.sqlite)
+     */
+    async importDatabaseFile(arrayBuffer) {
+        await this.init();
+        if (!arrayBuffer) throw new Error("No s'ha proporcionat cap fitxer vàlid.");
+
+        const u8 = new Uint8Array(arrayBuffer);
+        const importedDb = new this.SQL.Database(u8);
+
+        // Validar que tingui la taula 'jornadas'
+        const check = importedDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='jornadas';");
+        if (!check || check.length === 0 || check[0].values.length === 0) {
+            throw new Error("El fitxer seleccionat no és una base de dades vàlida de Beta10.");
+        }
+
+        try {
+            if (this.db) this.db.close();
+        } catch (e) {}
+
+        this.db = importedDb;
+        this._createTables(); // Aplica migracions si en calen
+        await this.persist();
+        console.log("✅ Base de dades SQLite restaurada i desada correctament a IndexedDB!");
+        return true;
+    }
+
     // ==========================================
     // UTILITATS
     // ==========================================

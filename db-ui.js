@@ -622,10 +622,16 @@ class Beta10DBUI {
 
                 <div class="db-actions-box">
                     <h4>Exportació i Còpia de Seguretat</h4>
-                    <p>Pots descarregar el fitxer real de la base de dades <code>.sqlite</code> per a visualitzar-lo amb SQLite Viewer, DBeaver o tenir còpia de seguretat externa.</p>
-                    <button class="btn btn-start db-download-btn" id="db-download-file-btn">
-                        📥 Descarregar Fitxer .sqlite
-                    </button>
+                    <p>Descarrega o restaura la teva base de dades <code>.sqlite</code> per a no perdre mai cap registre, jornada ni hores extra encara que reinstal·lis l'aplicació.</p>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+                        <button class="btn btn-start db-download-btn" id="db-download-file-btn" style="flex: 1; min-width: 160px;">
+                            📥 Descarregar Còpia (.sqlite)
+                        </button>
+                        <button class="btn btn-secondary db-upload-btn" id="db-upload-file-btn" style="flex: 1; min-width: 160px; background: #0284c7; color: white;">
+                            📤 Restaurar Còpia (.sqlite)
+                        </button>
+                        <input type="file" id="db-file-input" accept=".sqlite,.db" style="display: none;" />
+                    </div>
                 </div>
             </div>
         `;
@@ -641,7 +647,37 @@ class Beta10DBUI {
                     alert('Error en descarregar: ' + e.message);
                 } finally {
                     downloadBtn.disabled = false;
-                    downloadBtn.textContent = '📥 Descarregar Fitxer .sqlite';
+                    downloadBtn.textContent = '📥 Descarregar Còpia (.sqlite)';
+                }
+            };
+        }
+
+        const uploadBtn = container.querySelector('#db-upload-file-btn');
+        const fileInput = container.querySelector('#db-file-input');
+        if (uploadBtn && fileInput) {
+            uploadBtn.onclick = () => fileInput.click();
+            fileInput.onchange = async () => {
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                if (!confirm(`Vols restaurar la base de dades des del fitxer "${file.name}"? Això recuperarà totes les jornades i hores extra d'aquesta còpia.`)) {
+                    fileInput.value = '';
+                    return;
+                }
+
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Restaurant dades...';
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    await window.beta10DB.importDatabaseFile(arrayBuffer);
+                    alert('✅ Base de dades restaurada amb èxit! Totes les teves jornades i hores extra s\'han recuperat.');
+                    await this.renderActiveTab();
+                } catch (err) {
+                    alert('❌ Error restaurant la còpia: ' + err.message);
+                } finally {
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = '📤 Restaurar Còpia (.sqlite)';
+                    fileInput.value = '';
                 }
             };
         }

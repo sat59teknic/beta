@@ -49,3 +49,37 @@ if (fs.existsSync(srcAlarm)) {
     console.log('✅ alarm.wav copiat a res/raw per al timbre de la notificació nativa.');
 }
 
+// 🔐 Configurar Keystore fix per mantenir la mateixa signatura en totes les actualitzacions d'APK
+const keystoreSrc = path.resolve(__dirname, '../debug.keystore');
+const keystoreDest = path.resolve(__dirname, '../android/app/debug.keystore');
+if (fs.existsSync(keystoreSrc)) {
+    fs.copyFileSync(keystoreSrc, keystoreDest);
+    console.log('✅ debug.keystore copiat a android/app/debug.keystore');
+
+    // Configurar build.gradle d'Android per usar aquest keystore fix
+    const gradlePath = path.resolve(__dirname, '../android/app/build.gradle');
+    if (fs.existsSync(gradlePath)) {
+        let gradleContent = fs.readFileSync(gradlePath, 'utf8');
+        if (!gradleContent.includes("signingConfigs {")) {
+            const signingBlock = `
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+`;
+            gradleContent = gradleContent.replace('android {', `android {\n${signingBlock}`);
+            gradleContent = gradleContent.replace(
+                'buildTypes {',
+                `buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }`
+            );
+            fs.writeFileSync(gradlePath, gradleContent, 'utf8');
+            console.log('✅ android/app/build.gradle configurat amb signatura permanent debug.keystore.');
+        }
+    }
+}
+
+

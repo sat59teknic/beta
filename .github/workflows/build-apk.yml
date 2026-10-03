@@ -46,6 +46,11 @@ jobs:
           node scripts/generate-icons.js
           npx cap sync android
 
+      - name: 🔐 Configurar Keystore permanent
+        run: |
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
+
       - name: 🔨 Compilar APK amb Gradle (Debug)
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk

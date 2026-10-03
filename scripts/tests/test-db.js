@@ -31,6 +31,7 @@ module.exports = function registerDbTests(runner) {
                     standard_hours REAL DEFAULT 9,
                     worked_hours REAL NOT NULL,
                     extra_hours REAL DEFAULT 0,
+                    remunerated_extra_hours REAL DEFAULT 0,
                     pause_minutes REAL DEFAULT 0,
                     observations TEXT,
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -192,6 +193,34 @@ module.exports = function registerDbTests(runner) {
             const resP = db.exec("SELECT COUNT(*) FROM pausas WHERE id = ?", [pId]);
             assertEqual(resJ[0].values[0][0], 0, 'Jornada should be deleted');
             assertEqual(resP[0].values[0][0], 0, 'Pausa should be deleted');
+        });
+
+        suite.test('Export and Import/Restore Database file: restores all records and overtime', async () => {
+            // Insert specific record for yesterday and today
+            db.run(
+                "INSERT INTO jornadas (user, date, start_time, end_time, type, day_type, standard_hours, worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ['marc', '2026-10-02', '2026-10-02T08:00:00Z', '2026-10-02T18:00:00Z', 'JORNADA', 'Divendres', 9, 10.0, 1.0, 1.0, 30, 'Extra client ahir']
+            );
+            db.run(
+                "INSERT INTO jornadas (user, date, start_time, end_time, type, day_type, standard_hours, worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ['marc', '2026-10-03', '2026-10-03T08:00:00Z', '2026-10-03T17:45:00Z', 'JORNADA', 'Dissabte', 0, 9.75, 9.75, 9.5, 30, 'Extra dissabte avui']
+            );
+
+            // Export to binary bytes
+            const exportedBinary = db.export();
+            assert(exportedBinary.length > 0, 'Exported database must contain bytes');
+
+            // Simulate a brand new fresh database (as after fresh APK install)
+            const freshDb = new SQL.Database(exportedBinary);
+            const res = freshDb.exec("SELECT date, extra_hours, remunerated_extra_hours, observations FROM jornadas WHERE date IN ('2026-10-02', '2026-10-03') ORDER BY date ASC;");
+            
+            assert(res.length > 0 && res[0].values.length === 2, 'Restored database must contain exactly the 2 records');
+            assertEqual(res[0].values[0][0], '2026-10-02', 'Yesterday date matches');
+            assertEqual(res[0].values[0][1], 1.0, 'Yesterday extra hours matches');
+            assertEqual(res[0].values[0][2], 1.0, 'Yesterday remunerated extra hours matches');
+            assertEqual(res[0].values[1][0], '2026-10-03', 'Today date matches');
+            assertEqual(res[0].values[1][1], 9.75, 'Today extra hours matches');
+            assertEqual(res[0].values[1][2], 9.5, 'Today remunerated extra hours matches');
         });
     });
 };
