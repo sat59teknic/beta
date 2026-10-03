@@ -12,6 +12,13 @@ class Beta10Database {
         this.IDB_NAME = 'beta10_sqlite_storage';
         this.IDB_STORE = 'sqlite_file';
         this.IDB_KEY = 'database_bytes';
+        // Còpia de la BD anterior a l'última restauració (per poder desfer-la)
+        this.IDB_PRE_RESTORE_KEY = 'database_bytes_pre_restore';
+        this._previousSnapshot = null;
+        // Cua que serialitza els desats a IndexedDB (L9): mai dos export/put concurrents
+        this._persistQueue = Promise.resolve();
+        // Versió d'esquema (PRAGMA user_version)
+        this.SCHEMA_VERSION = 1;
     }
 
     /**
@@ -21,7 +28,7 @@ class Beta10Database {
         if (this.isInitialized && this.db) return true;
         if (this.initPromise) return this.initPromise;
 
-        this.initPromise = (async () => {
+        const initRun = (async () => {
             try {
                 console.log('🔄 Inicialitzant SQLite (sql.js Wasm)...');
 
@@ -56,8 +63,13 @@ class Beta10Database {
                 // 3. Crear taules si no existeixen
                 this._createTables();
 
-                // 4. Desar estat inicial
-                await this.persist();
+                // 4. Desar estat inicial (no fatal: la BD en memòria ja és operativa;
+                //    els desats posteriors reintentaran i propagaran l'error)
+                try {
+                    await this.persist();
+                } catch (persistErr) {
+                    console.warn('⚠️ No s\'ha pogut desar l\'estat inicial a IndexedDB:', persistErr);
+                }
 
                 this.isInitialized = true;
                 console.log('✅ Base de dades SQLite llesta i operativa!');
@@ -65,11 +77,21 @@ class Beta10Database {
             } catch (err) {
                 console.error('❌ Error inicialitzant SQLite:', err);
                 this.isInitialized = false;
+                try { if (this.db) this.db.close(); } catch (closeErr) {}
+                this.db = null;
                 throw err;
             }
         })();
 
-        return this.initPromise;
+        // A3: no deixar la promesa rebutjada en cache; el proper init() torna a intentar-ho.
+        // (S'ha de fer aquí i no al catch: si l'error és síncron, el catch s'executaria abans
+        // d'assignar this.initPromise i l'assignació posterior ho tornaria a deixar rebutjat.)
+        this.initPromise = initRun;
+        initRun.catch(() => {
+            if (this.initPromise === initRun) this.initPromise = null;
+        });
+
+        return initRun;
     }
 
     /**
@@ -118,26 +140,95 @@ class Beta10Database {
             );
         `;
         this.db.run(schema);
+        this._migrate();
+        this.db.run('CREATE INDEX IF NOT EXISTS idx_jornadas_date ON jornadas(date);');
+        this.db.run('CREATE INDEX IF NOT EXISTS idx_pausas_date ON pausas(date);');
+    }
 
-        // Migració per afegir remunerated_extra_hours si s'utilitza una base de dades existent
-        try {
-            this.db.run("ALTER TABLE jornadas ADD COLUMN remunerated_extra_hours REAL DEFAULT 0;");
-        } catch (e) {
-            // La columna ja existeix
+    /**
+     * Retorna els noms de columna d'una taula (PRAGMA table_info). [] si la taula no existeix.
+     */
+    _getColumns(table, dbInstance = this.db) {
+        const res = dbInstance.exec(`PRAGMA table_info(${table})`);
+        if (!res || res.length === 0) return [];
+        const nameIdx = res[0].columns.indexOf('name');
+        return res[0].values.map(row => row[nameIdx]);
+    }
+
+    /**
+     * Migracions idempotents basades en PRAGMA table_info / user_version (A1).
+     * No s'empassa errors genèrics: només s'afegeix la columna si realment falta.
+     */
+    _migrate() {
+        const cols = this._getColumns('jornadas');
+        if (!cols.includes('remunerated_extra_hours')) {
+            this.db.run('ALTER TABLE jornadas ADD COLUMN remunerated_extra_hours REAL DEFAULT 0;');
+            // Omplir l'històric: blocs complets de 30 min per jornada (mateixa fórmula que recordJornada)
+            this.db.run(`UPDATE jornadas
+                SET remunerated_extra_hours = CAST((COALESCE(extra_hours, 0) + 0.0001) / 0.5 AS INT) * 0.5;`);
+        }
+        const res = this.db.exec('PRAGMA user_version');
+        const current = (res[0] && res[0].values[0][0]) || 0;
+        if (current < this.SCHEMA_VERSION) {
+            this.db.run(`PRAGMA user_version = ${this.SCHEMA_VERSION};`);
         }
     }
 
     /**
      * Desa el contingut actual de SQLite a IndexedDB
      */
-    async persist() {
-        if (!this.db) return;
+    persist() {
+        // L9: cua/mutex. Cada desat espera l'anterior, així no hi ha exports ni put concurrents
+        // que puguin acabar escrivint un estat més antic sobre un de més nou.
+        const run = async () => {
+            if (!this.db) return false;
+            try {
+                const data = this.db.export();
+                await this._saveToIndexedDB(data);
+                return true;
+            } catch (err) {
+                console.error('❌ Error persistint SQLite a IndexedDB:', err);
+                throw err; // A2: l'error ha d'arribar a qui ha cridat (UI / cua de pendents)
+            }
+        };
+        const result = this._persistQueue.then(run, run);
+        this._persistQueue = result.catch(() => {});
+        return result;
+    }
+
+    /**
+     * Persisteix; si falla, desfà el canvi en memòria (undo) perquè un reintent
+     * (p. ex. la cua de jornades pendents) no dupliqui files.
+     */
+    async _persistOrUndo(undo) {
         try {
-            const data = this.db.export();
-            await this._saveToIndexedDB(data);
+            await this.persist();
         } catch (err) {
-            console.error('❌ Error persistint SQLite a IndexedDB:', err);
+            try { if (undo) undo(); } catch (undoErr) { console.warn('⚠️ No s\'ha pogut desfer el canvi:', undoErr); }
+            throw err;
         }
+    }
+
+    _lastInsertId() {
+        const r = this.db.exec('SELECT last_insert_rowid()');
+        return r[0].values[0][0];
+    }
+
+    _snapshotRow(table, id) {
+        const stmt = this.db.prepare(`SELECT * FROM ${table} WHERE id = ?`);
+        stmt.bind([id]);
+        const row = stmt.step() ? stmt.getAsObject() : null;
+        stmt.free();
+        return row;
+    }
+
+    _restoreRow(table, row) {
+        if (!row) return;
+        const cols = Object.keys(row);
+        this.db.run(
+            `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+            cols.map(c => row[c])
+        );
     }
 
     /**
@@ -161,38 +252,48 @@ class Beta10Database {
     /**
      * Desa bytes a IndexedDB
      */
-    async _saveToIndexedDB(bytes) {
+    async _saveToIndexedDB(bytes, key = this.IDB_KEY) {
         if (typeof indexedDB === 'undefined') return true;
         const idb = await this._openIndexedDB();
         if (!idb) return true;
+        const closeIdb = () => { try { if (typeof idb.close === 'function') idb.close(); } catch (e) {} };
         return new Promise((resolve, reject) => {
             const tx = idb.transaction(this.IDB_STORE, 'readwrite');
+            tx.onabort = () => { closeIdb(); reject(tx.error || new Error('Transacció IndexedDB avortada')); };
             const store = tx.objectStore(this.IDB_STORE);
-            const req = store.put(bytes, this.IDB_KEY);
-            req.onsuccess = () => resolve(true);
-            req.onerror = () => reject(req.error);
+            const req = store.put(bytes, key);
+            req.onsuccess = () => { closeIdb(); resolve(true); };
+            req.onerror = () => { closeIdb(); reject(req.error); };
         });
     }
 
     /**
      * Carrega bytes des d'IndexedDB
      */
-    async _loadFromIndexedDB() {
+    async _loadFromIndexedDB(key = this.IDB_KEY) {
         if (typeof indexedDB === 'undefined') return null;
         const idb = await this._openIndexedDB();
         if (!idb) return null;
+        const closeIdb = () => { try { if (typeof idb.close === 'function') idb.close(); } catch (e) {} };
         return new Promise((resolve, reject) => {
             const tx = idb.transaction(this.IDB_STORE, 'readonly');
             const store = tx.objectStore(this.IDB_STORE);
-            const req = store.get(this.IDB_KEY);
-            req.onsuccess = () => resolve(req.result ? new Uint8Array(req.result) : null);
-            req.onerror = () => reject(req.error);
+            const req = store.get(key);
+            req.onsuccess = () => { closeIdb(); resolve(req.result ? new Uint8Array(req.result) : null); };
+            req.onerror = () => { closeIdb(); reject(req.error); };
         });
     }
 
     // ==========================================
     // INSERCIÓ DE DADES
     // ==========================================
+    // Totes les escriptures propaguen l'error si IndexedDB falla (A2) i desfan el
+    // canvi en memòria perquè un reintent no dupliqui registres.
+
+    _num(value, fallback = 0) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+    }
 
     /**
      * Registra un fitxatge individual
@@ -205,7 +306,8 @@ class Beta10Database {
             VALUES (?, ?, ?, ?, ?, ?, ?);
         `;
         this.db.run(sql, [user, ts, action, point, observations || '', latitude, longitude]);
-        await this.persist();
+        const id = this._lastInsertId();
+        await this._persistOrUndo(() => this.db.run('DELETE FROM fichajes WHERE id = ?;', [id]));
         console.log(`💾 SQLite: Fitxatge registrat (${action} ${point})`);
     }
 
@@ -217,14 +319,15 @@ class Beta10Database {
         const d = date || this.formatDate(startTime || new Date());
         const startIso = new Date(startTime).toISOString();
         const endIso = new Date(endTime).toISOString();
-        const durMin = Math.round(durationMinutes * 10) / 10;
+        const durMin = Math.round(this._num(durationMinutes) * 10) / 10;
 
         const sql = `
             INSERT INTO pausas (user, date, type, start_time, end_time, duration_minutes)
             VALUES (?, ?, ?, ?, ?, ?);
         `;
         this.db.run(sql, [user, d, type, startIso, endIso, durMin]);
-        await this.persist();
+        const id = this._lastInsertId();
+        await this._persistOrUndo(() => this.db.run('DELETE FROM pausas WHERE id = ?;', [id]));
         console.log(`💾 SQLite: Pausa registrada (${type}, ${durMin} min)`);
     }
 
@@ -250,19 +353,28 @@ class Beta10Database {
         const startIso = new Date(startTime).toISOString();
         const endIso = new Date(endTime).toISOString();
         const stdH = Number(standardHours) || 0;
-        const wrkH = Math.round(Number(workedHours) * 100) / 100;
-        const extH = Math.round(Number(extraHours) * 100) / 100;
-        const remExtH = remuneratedExtraHours !== null && remuneratedExtraHours !== undefined
-            ? Math.round(Number(remuneratedExtraHours) * 100) / 100
+        const wrkRaw = Number(workedHours);
+        if (!Number.isFinite(wrkRaw)) {
+            throw new Error('workedHours no és un número vàlid');
+        }
+        const wrkH = Math.round(wrkRaw * 100) / 100;
+        // NaN/negatiu en extraHours no ha de deixar NULL ni valors absurds a la BD
+        const extH = Math.max(0, Math.round(this._num(extraHours) * 100) / 100);
+        const remExplicit = (remuneratedExtraHours !== null && remuneratedExtraHours !== undefined && Number.isFinite(Number(remuneratedExtraHours)))
+            ? Math.max(0, Math.round(Number(remuneratedExtraHours) * 100) / 100)
+            : null;
+        const remExtH = remExplicit !== null
+            ? remExplicit
             : Math.floor((extH + 0.0001) / 0.5) * 0.5;
-        const pauM = Math.round(Number(pauseMinutes) * 10) / 10;
+        const pauM = Math.max(0, Math.round(this._num(pauseMinutes) * 10) / 10);
 
         const sql = `
             INSERT INTO jornadas (user, date, start_time, end_time, type, day_type, standard_hours, worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         `;
         this.db.run(sql, [user, d, startIso, endIso, type, dayType, stdH, wrkH, extH, remExtH, pauM, observations || '']);
-        await this.persist();
+        const id = this._lastInsertId();
+        await this._persistOrUndo(() => this.db.run('DELETE FROM jornadas WHERE id = ?;', [id]));
         console.log(`💾 SQLite: Jornada registrada (${d}: ${wrkH}h treballades, ${extH}h extra real, ${remExtH}h extra remunerades)`);
     }
 
@@ -271,25 +383,30 @@ class Beta10Database {
      */
     async updateJornada(id, { worked_hours, extra_hours, remunerated_extra_hours, pause_minutes, observations }) {
         await this.init();
-        const extH = Math.round(Number(extra_hours) * 100) / 100;
-        const remH = remunerated_extra_hours !== undefined && remunerated_extra_hours !== null
-            ? Math.round(Number(remunerated_extra_hours) * 100) / 100
+        const wrkRaw = Number(worked_hours);
+        if (!Number.isFinite(wrkRaw)) {
+            throw new Error('worked_hours no és un número vàlid');
+        }
+        const extH = Math.max(0, Math.round(this._num(extra_hours) * 100) / 100);
+        const remH = (remunerated_extra_hours !== undefined && remunerated_extra_hours !== null && Number.isFinite(Number(remunerated_extra_hours)))
+            ? Math.max(0, Math.round(Number(remunerated_extra_hours) * 100) / 100)
             : Math.floor((extH + 0.0001) / 0.5) * 0.5;
 
+        const previous = this._snapshotRow('jornadas', id);
         const sql = `
-            UPDATE jornadas 
+            UPDATE jornadas
             SET worked_hours = ?, extra_hours = ?, remunerated_extra_hours = ?, pause_minutes = ?, observations = ?
             WHERE id = ?;
         `;
         this.db.run(sql, [
-            Math.round(Number(worked_hours) * 100) / 100,
+            Math.round(wrkRaw * 100) / 100,
             extH,
             remH,
-            Math.round(Number(pause_minutes) * 10) / 10,
+            Math.round(this._num(pause_minutes) * 10) / 10,
             observations || '',
             id
         ]);
-        await this.persist();
+        await this._persistOrUndo(() => this._restoreRow('jornadas', previous));
         console.log(`💾 SQLite: Jornada #${id} actualitzada`);
     }
 
@@ -298,8 +415,9 @@ class Beta10Database {
      */
     async deleteJornada(id) {
         await this.init();
+        const previous = this._snapshotRow('jornadas', id);
         this.db.run("DELETE FROM jornadas WHERE id = ?;", [id]);
-        await this.persist();
+        await this._persistOrUndo(() => this._restoreRow('jornadas', previous));
         console.log(`💾 SQLite: Jornada #${id} eliminada`);
     }
 
@@ -308,8 +426,9 @@ class Beta10Database {
      */
     async deletePausa(id) {
         await this.init();
+        const previous = this._snapshotRow('pausas', id);
         this.db.run("DELETE FROM pausas WHERE id = ?;", [id]);
-        await this.persist();
+        await this._persistOrUndo(() => this._restoreRow('pausas', previous));
         console.log(`💾 SQLite: Pausa #${id} eliminada`);
     }
 
@@ -318,23 +437,41 @@ class Beta10Database {
     // ==========================================
 
     /**
-     * Retorna el resum d'hores extra agrupades per mes
-     * Diferencia entre hores extra treballades (totals reals) i hores extra remunerades (blocs de 30 min per dia)
+     * Retorna el resum d'hores extra agrupades per mes.
+     *
+     * Fórmula (M5): la remuneració és PER DIA, no per fila. Per a cada dia amb extra:
+     *   - si només hi ha una jornada aquell dia, es respecta el valor desat a
+     *     remunerated_extra_hours (o, si és NULL, floor(extra / 0.5) * 0.5);
+     *   - si hi ha diverses jornades el mateix dia, es sumen les extra reals del dia i
+     *     s'aplica floor(suma / 0.5) * 0.5 (blocs complets de 30 min).
+     * Després se sumen els dies del mes. days_with_extra compta DIES distints (L7).
+     * total_worked_hours és el total treballat de TOT el mes (també dies sense extra).
      */
     async getMonthlyOvertimeSummary() {
         await this.init();
         const sql = `
-            SELECT 
-                strftime('%Y-%m', date) as month,
-                ROUND(SUM(extra_hours), 2) as total_worked_extra_hours,
-                ROUND(SUM(COALESCE(remunerated_extra_hours, CAST(((extra_hours + 0.0001) / 0.5) AS INT) * 0.5)), 2) as total_remunerated_extra_hours,
-                ROUND(SUM(extra_hours), 2) as total_extra_hours,
-                ROUND(SUM(worked_hours), 2) as total_worked_hours,
-                COUNT(*) as days_with_extra
-            FROM jornadas 
-            WHERE extra_hours > 0 
-            GROUP BY strftime('%Y-%m', date) 
-            ORDER BY month DESC;
+            SELECT
+                d.month AS month,
+                ROUND(SUM(d.extra), 2) AS total_worked_extra_hours,
+                ROUND(SUM(d.rem), 2) AS total_remunerated_extra_hours,
+                ROUND(SUM(d.extra), 2) AS total_extra_hours,
+                ROUND((SELECT COALESCE(SUM(j.worked_hours), 0) FROM jornadas j WHERE strftime('%Y-%m', j.date) = d.month), 2) AS total_worked_hours,
+                COUNT(*) AS days_with_extra
+            FROM (
+                SELECT
+                    strftime('%Y-%m', date) AS month,
+                    date,
+                    SUM(extra_hours) AS extra,
+                    CASE WHEN COUNT(*) = 1
+                        THEN COALESCE(MAX(remunerated_extra_hours), CAST((SUM(extra_hours) + 0.0001) / 0.5 AS INT) * 0.5)
+                        ELSE CAST((SUM(extra_hours) + 0.0001) / 0.5 AS INT) * 0.5
+                    END AS rem
+                FROM jornadas
+                WHERE extra_hours > 0
+                GROUP BY date
+            ) d
+            GROUP BY d.month
+            ORDER BY d.month DESC;
         `;
         const res = this.db.exec(sql);
         return this._formatQueryResults(res);
@@ -346,18 +483,11 @@ class Beta10Database {
     async getOvertimeDaysForMonth(yearMonth) {
         await this.init();
         const sql = `
-            SELECT * FROM jornadas 
-            WHERE strftime('%Y-%m', date) = ? AND extra_hours > 0 
+            SELECT * FROM jornadas
+            WHERE strftime('%Y-%m', date) = ? AND extra_hours > 0
             ORDER BY date DESC, id DESC;
         `;
-        const stmt = this.db.prepare(sql);
-        stmt.bind([yearMonth]);
-        const rows = [];
-        while (stmt.step()) {
-            rows.push(stmt.getAsObject());
-        }
-        stmt.free();
-        return rows;
+        return this._queryAll(sql, [yearMonth]);
     }
 
     /**
@@ -366,27 +496,20 @@ class Beta10Database {
     async getJornadasForMonth(yearMonth) {
         await this.init();
         const sql = `
-            SELECT * FROM jornadas 
-            WHERE strftime('%Y-%m', date) = ? 
+            SELECT * FROM jornadas
+            WHERE strftime('%Y-%m', date) = ?
             ORDER BY date ASC, id ASC;
         `;
-        const stmt = this.db.prepare(sql);
-        stmt.bind([yearMonth]);
-        const rows = [];
-        while (stmt.step()) {
-            rows.push(stmt.getAsObject());
-        }
-        stmt.free();
-        return rows;
+        return this._queryAll(sql, [yearMonth]);
     }
 
     /**
-     * Retorna el resum de pauses diàries (desglossat per esmorzar, dinar i total)
+     * Retorna el resum de pauses diàries (desglossat per esmorçar, dinar i total)
      */
     async getDailyPausesSummary(limit = 60) {
         await this.init();
         const sql = `
-            SELECT 
+            SELECT
                 date,
                 ROUND(SUM(CASE WHEN type = 'esmorçar' THEN duration_minutes ELSE 0 END), 1) as breakfast_min,
                 ROUND(SUM(CASE WHEN type = 'dinar' THEN duration_minutes ELSE 0 END), 1) as lunch_min,
@@ -397,14 +520,7 @@ class Beta10Database {
             ORDER BY date DESC
             LIMIT ?;
         `;
-        const stmt = this.db.prepare(sql);
-        stmt.bind([limit]);
-        const rows = [];
-        while (stmt.step()) {
-            rows.push(stmt.getAsObject());
-        }
-        stmt.free();
-        return rows;
+        return this._queryAll(sql, [limit]);
     }
 
     /**
@@ -413,18 +529,11 @@ class Beta10Database {
     async getPausesForDate(dateStr) {
         await this.init();
         const sql = `
-            SELECT * FROM pausas 
-            WHERE date = ? 
+            SELECT * FROM pausas
+            WHERE date = ?
             ORDER BY start_time ASC;
         `;
-        const stmt = this.db.prepare(sql);
-        stmt.bind([dateStr]);
-        const rows = [];
-        while (stmt.step()) {
-            rows.push(stmt.getAsObject());
-        }
-        stmt.free();
-        return rows;
+        return this._queryAll(sql, [dateStr]);
     }
 
     /**
@@ -433,18 +542,25 @@ class Beta10Database {
     async getRecentJornadas(limit = 30) {
         await this.init();
         const sql = `
-            SELECT * FROM jornadas 
-            ORDER BY date DESC, id DESC 
+            SELECT * FROM jornadas
+            ORDER BY date DESC, id DESC
             LIMIT ?;
         `;
+        return this._queryAll(sql, [limit]);
+    }
+
+    _queryAll(sql, params = []) {
         const stmt = this.db.prepare(sql);
-        stmt.bind([limit]);
-        const rows = [];
-        while (stmt.step()) {
-            rows.push(stmt.getAsObject());
+        try {
+            stmt.bind(params);
+            const rows = [];
+            while (stmt.step()) {
+                rows.push(stmt.getAsObject());
+            }
+            return rows;
+        } finally {
+            stmt.free();
         }
-        stmt.free();
-        return rows;
     }
 
     /**
@@ -452,21 +568,39 @@ class Beta10Database {
      */
     async getDatabaseStats() {
         await this.init();
-        const countJ = this.db.exec("SELECT COUNT(*) as c FROM jornadas")[0]?.values[0][0] || 0;
-        const countP = this.db.exec("SELECT COUNT(*) as c FROM pausas")[0]?.values[0][0] || 0;
-        const countF = this.db.exec("SELECT COUNT(*) as c FROM fichajes")[0]?.values[0][0] || 0;
-        const bytes = this.db.export();
+        const count = (table) => this.db.exec(`SELECT COUNT(*) as c FROM ${table}`)[0]?.values[0][0] || 0;
+        // Mida = pàgines * mida de pàgina (evita exportar tota la BD només per mesurar-la)
+        const pages = this.db.exec('PRAGMA page_count')[0]?.values[0][0] || 0;
+        const pageSize = this.db.exec('PRAGMA page_size')[0]?.values[0][0] || 0;
         return {
-            jornadasCount: countJ,
-            pausasCount: countP,
-            fichajesCount: countF,
-            sizeKb: Math.round(bytes.length / 1024)
+            jornadasCount: count('jornadas'),
+            pausasCount: count('pausas'),
+            fichajesCount: count('fichajes'),
+            sizeKb: Math.round((pages * pageSize) / 1024)
         };
     }
 
     /**
-     * Exporta i descarrega el fitxer .sqlite al dispositiu de l'usuari
-     * Suporta Web Share API a Android per obrir el menú natiu de desar o compartir
+     * Indica si el dispositiu és l'app nativa Capacitor (APK), on <a download> sobre un blob
+     * NO descarrega res (el WebView no té DownloadListener).
+     */
+    _isNativePlatform() {
+        try {
+            const w = typeof window !== 'undefined' ? window : null;
+            return !!(w && w.Capacitor && typeof w.Capacitor.isNativePlatform === 'function' && w.Capacitor.isNativePlatform());
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Exporta i comparteix/descarrega el fitxer .sqlite.
+     *
+     * Retorna { success, method, fileName, needsBase64? }:
+     *  - success=true NOMÉS si hi ha indicis raonables que l'usuari ha rebut el fitxer
+     *    (menú de compartir obert, o descàrrega del navegador iniciada en web).
+     *  - A l'APK sense plugins Share/Filesystem NO es fa creure que s'ha descarregat (A5):
+     *    es retorna success=false + needsBase64=true perquè la UI ofereixi la còpia en text.
      */
     async downloadDatabaseFile() {
         await this.init();
@@ -474,9 +608,33 @@ class Beta10Database {
         const blob = new Blob([binaryArray], { type: 'application/x-sqlite3' });
         const today = this.formatDate(new Date());
         const fileName = `beta10_registres_${today}.sqlite`;
+        const native = this._isNativePlatform();
 
-        // 1. MÈTODE 1: Android WebView / Mòbil (Web Share API)
-        // A Android WebView aquest mètode permet desar directament a Descàrregues / Drive / WhatsApp
+        // 1. MÈTODE NATIU: plugins Capacitor Filesystem + Share (si estan instal·lats)
+        if (native) {
+            const plugins = (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.Plugins) || {};
+            if (plugins.Filesystem && plugins.Share) {
+                try {
+                    const data = await this.exportDatabaseAsBase64();
+                    const written = await plugins.Filesystem.writeFile({ path: fileName, data, directory: 'CACHE' });
+                    await plugins.Share.share({
+                        title: fileName,
+                        text: 'Còpia de seguretat SQLite Beta10',
+                        url: written && written.uri,
+                        dialogTitle: 'Desa la còpia de seguretat'
+                    });
+                    return { success: true, method: 'capacitor_share', fileName };
+                } catch (nativeErr) {
+                    const msg = String((nativeErr && nativeErr.message) || nativeErr).toLowerCase();
+                    if (msg.includes('cancel')) {
+                        return { success: true, method: 'cancelled_by_user', fileName };
+                    }
+                    console.warn('Share nadiu ha fallat:', nativeErr);
+                }
+            }
+        }
+
+        // 2. MÈTODE WEB SHARE API (navegadors mòbils i alguns WebView)
         const nav = typeof navigator !== 'undefined' ? navigator : null;
         if (nav && typeof nav.canShare === 'function' && typeof File !== 'undefined') {
             try {
@@ -490,14 +648,25 @@ class Beta10Database {
                     return { success: true, method: 'share', fileName };
                 }
             } catch (shareErr) {
-                if (shareErr.name === 'AbortError') {
+                if (shareErr && shareErr.name === 'AbortError') {
                     return { success: true, method: 'cancelled_by_user', fileName };
                 }
-                console.warn('Web Share no disponible, provant descàrrega directa:', shareErr);
+                console.warn('Web Share no disponible, provant alternativa:', shareErr);
             }
         }
 
-        // 2. MÈTODE 2: Descàrrega directa amb retard de revoke (evita cancel·lació a WebView)
+        // 3. A l'APK, la descàrrega per <a download> no funciona: no simular èxit.
+        if (native) {
+            return {
+                success: false,
+                method: 'native_download_unsupported',
+                needsBase64: true,
+                fileName,
+                error: 'Aquest dispositiu no permet desar el fitxer directament. Usa la còpia en text (Base64).'
+            };
+        }
+
+        // 4. NAVEGADOR WEB: descàrrega directa amb retard de revoke
         if (typeof URL !== 'undefined' && typeof document !== 'undefined') {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -562,29 +731,129 @@ class Beta10Database {
     }
 
     /**
-     * Importa i restaura una base de dades SQLite des d'un ArrayBuffer (.sqlite)
+     * Columnes obligatòries per considerar que un fitxer és una BD de Beta10 (A4).
+     * remunerated_extra_hours NO és obligatòria: els backups antics no la tenen i es migra.
+     */
+    static get REQUIRED_COLUMNS() {
+        return {
+            jornadas: ['id', 'user', 'date', 'start_time', 'end_time', 'type', 'day_type', 'standard_hours', 'worked_hours', 'extra_hours', 'pause_minutes', 'observations'],
+            pausas: ['id', 'user', 'date', 'type', 'start_time', 'end_time', 'duration_minutes'],
+            fichajes: ['id', 'user', 'timestamp', 'action', 'point', 'observations', 'latitude', 'longitude']
+        };
+    }
+
+    /**
+     * Valida una instància candidata. Llança Error si no és vàlida.
+     */
+    _validateImportedDb(candidate) {
+        const quick = candidate.exec('PRAGMA quick_check');
+        const verdict = quick && quick[0] && quick[0].values[0] && quick[0].values[0][0];
+        if (verdict !== 'ok') {
+            throw new Error('El fitxer seleccionat està malmès o no és una base de dades SQLite vàlida.');
+        }
+        const tables = candidate.exec("SELECT name FROM sqlite_master WHERE type='table';");
+        const names = (tables && tables[0]) ? tables[0].values.map(r => r[0]) : [];
+        if (!names.includes('jornadas')) {
+            throw new Error("El fitxer seleccionat no és una base de dades vàlida de Beta10.");
+        }
+        const required = Beta10Database.REQUIRED_COLUMNS;
+        for (const table of Object.keys(required)) {
+            if (!names.includes(table)) continue; // les taules que falten es creen després
+            const cols = this._getColumns(table, candidate);
+            const missing = required[table].filter(c => !cols.includes(c));
+            if (missing.length > 0) {
+                throw new Error(`El fitxer no és una còpia vàlida de Beta10: a la taula "${table}" falten les columnes ${missing.join(', ')}.`);
+            }
+        }
+    }
+
+    /**
+     * Importa i restaura una base de dades SQLite des d'un ArrayBuffer (.sqlite).
+     *
+     * Ordre segur (A4): 1) obrir i validar el candidat (tancant-lo si falla), 2) guardar una
+     * còpia de la BD actual per poder desfer, 3) activar el candidat + migrar + PERSISTIR,
+     * 4) només aleshores tancar l'antiga. Si persistir falla es retorna a la BD anterior.
      */
     async importDatabaseFile(arrayBuffer) {
         await this.init();
         if (!arrayBuffer) throw new Error("No s'ha proporcionat cap fitxer vàlid.");
 
         const u8 = new Uint8Array(arrayBuffer);
-        const importedDb = new this.SQL.Database(u8);
+        let importedDb = null;
+        try {
+            importedDb = new this.SQL.Database(u8);
+            this._validateImportedDb(importedDb);
+        } catch (validationErr) {
+            try { if (importedDb) importedDb.close(); } catch (e) {}
+            throw validationErr;
+        }
 
-        // Validar que tingui la taula 'jornadas'
-        const check = importedDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='jornadas';");
-        if (!check || check.length === 0 || check[0].values.length === 0) {
-            throw new Error("El fitxer seleccionat no és una base de dades vàlida de Beta10.");
+        const previousDb = this.db;
+        const previousBytes = previousDb ? previousDb.export() : null;
+        try {
+            if (previousBytes) {
+                this._previousSnapshot = previousBytes;
+                try {
+                    await this._saveToIndexedDB(previousBytes, this.IDB_PRE_RESTORE_KEY);
+                } catch (snapErr) {
+                    console.warn('⚠️ No s\'ha pogut desar la còpia prèvia a IndexedDB (només en memòria):', snapErr);
+                }
+            }
+            this.db = importedDb;
+            this._createTables(); // Aplica migracions si en calen
+            await this.persist();
+        } catch (applyErr) {
+            // Rollback: tornar a la BD anterior i descartar el candidat
+            this.db = previousDb;
+            try { importedDb.close(); } catch (e) {}
+            throw applyErr;
         }
 
         try {
-            if (this.db) this.db.close();
+            if (previousDb) previousDb.close();
         } catch (e) {}
-
-        this.db = importedDb;
-        this._createTables(); // Aplica migracions si en calen
-        await this.persist();
         console.log("✅ Base de dades SQLite restaurada i desada correctament a IndexedDB!");
+        return true;
+    }
+
+    /**
+     * Hi ha una còpia prèvia a l'última restauració que es pot recuperar?
+     */
+    async hasRestoreSnapshot() {
+        if (this._previousSnapshot) return true;
+        try {
+            const bytes = await this._loadFromIndexedDB(this.IDB_PRE_RESTORE_KEY);
+            return !!(bytes && bytes.length > 0);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Desfà l'última restauració tornant a la BD anterior.
+     */
+    async undoLastRestore() {
+        await this.init();
+        let bytes = this._previousSnapshot;
+        if (!bytes) {
+            bytes = await this._loadFromIndexedDB(this.IDB_PRE_RESTORE_KEY);
+        }
+        if (!bytes || bytes.length === 0) {
+            throw new Error('No hi ha cap còpia prèvia per recuperar.');
+        }
+        const restored = new this.SQL.Database(new Uint8Array(bytes));
+        const current = this.db;
+        try {
+            this.db = restored;
+            this._createTables();
+            await this.persist();
+        } catch (err) {
+            this.db = current;
+            try { restored.close(); } catch (e) {}
+            throw err;
+        }
+        try { if (current) current.close(); } catch (e) {}
+        this._previousSnapshot = null;
         return true;
     }
 

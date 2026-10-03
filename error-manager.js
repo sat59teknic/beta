@@ -33,7 +33,7 @@ class ErrorManager {
         errorElement.innerHTML = `
             <div class="error-content">
                 <span class="error-icon">${icon}</span>
-                <span class="error-text">${message}</span>
+                <span class="error-text">${String(message === null || message === undefined ? '' : message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
                 <button class="error-close" onclick="this.parentElement.parentElement.remove()">×</button>
             </div>
         `;

@@ -3,6 +3,41 @@
  * Mostra hores extra mensuals totals, pauses diàries i gestió de la base de dades SQLite.
  */
 
+/**
+ * Escapa text provinent de l'usuari o de la BD abans d'inserir-lo amb innerHTML (M11).
+ */
+function escapeHtml(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
+ * Hores decimals -> "1h 5min" arrodonint PRIMER a minuts totals (L11: evita "1h 60min").
+ */
+function formatHoursMinutes(decimalHours) {
+    const totalMin = Math.max(0, Math.round((Number(decimalHours) || 0) * 60));
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h === 0) return `${m}min`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}min`;
+}
+
+/**
+ * Data LOCAL en format YYYY-MM-DD (L1: toISOString() dóna la data UTC i a les 00:30
+ * d'Espanya retornaria ahir).
+ */
+function localDateString(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
 class Beta10DBUI {
     constructor() {
         this.modalElement = null;
@@ -123,7 +158,7 @@ class Beta10DBUI {
             }
         } catch (err) {
             console.error('Error renderitzant pestanya:', err);
-            container.innerHTML = `<div class="db-error-box">⚠️ Error carregant dades: ${err.message}</div>`;
+            container.innerHTML = `<div class="db-error-box">⚠️ Error carregant dades: ${escapeHtml(err.message)}</div>`;
         }
     }
 
@@ -159,20 +194,14 @@ class Beta10DBUI {
             return `${months[parseInt(m, 10) - 1]} ${y}`;
         };
 
-        const formatHoursMin = (decimalHours) => {
-            const h = Math.floor(decimalHours);
-            const m = Math.round((decimalHours % 1) * 60);
-            if (h === 0) return `${m}min`;
-            if (m === 0) return `${h}h`;
-            return `${h}h ${m}min`;
-        };
+        const formatHoursMin = formatHoursMinutes;
 
         let monthsOptionsHtml = monthlySummary.map(m => {
             const remH = m.total_remunerated_extra_hours !== undefined ? m.total_remunerated_extra_hours : m.total_extra_hours;
             const wrkH = m.total_worked_extra_hours !== undefined ? m.total_worked_extra_hours : m.total_extra_hours;
             return `
-                <option value="${m.month}" ${m.month === this.selectedMonth ? 'selected' : ''}>
-                    ${formatMonthName(m.month)} (💰 ${formatHoursMin(remH)} remunerades / 🕒 ${formatHoursMin(wrkH)} reals)
+                <option value="${escapeHtml(m.month)}" ${m.month === this.selectedMonth ? 'selected' : ''}>
+                    ${escapeHtml(formatMonthName(m.month))} (💰 ${formatHoursMin(remH)} remunerades / 🕒 ${formatHoursMin(wrkH)} reals)
                 </option>
             `;
         }).join('');
@@ -212,7 +241,7 @@ class Beta10DBUI {
                     : Math.floor((wrkExt + 0.0001) / 0.5) * 0.5;
 
                 calDaysHtml += `
-                    <div class="cal-day has-overtime" data-date="${dateStr}" title="Dia ${day}: +${formatHoursMin(wrkExt)} treballades / +${formatHoursMin(remExt)} remunerades">
+                    <div class="cal-day has-overtime" data-date="${escapeHtml(dateStr)}" title="Dia ${day}: +${formatHoursMin(wrkExt)} treballades / +${formatHoursMin(remExt)} remunerades">
                         <span class="cal-date-num">${day}</span>
                         <span class="cal-ot-badge ${remExt > 0 ? 'cal-paid' : 'cal-unpaid'}">+${formatHoursMin(remExt > 0 ? remExt : wrkExt)}</span>
                         ${otData.observations ? '<span class="cal-dot-obs">💬</span>' : ''}
@@ -220,7 +249,7 @@ class Beta10DBUI {
                 `;
             } else {
                 calDaysHtml += `
-                    <div class="cal-day ${isWeekend ? 'is-weekend' : 'regular'}" data-date="${dateStr}">
+                    <div class="cal-day ${isWeekend ? 'is-weekend' : 'regular'}" data-date="${escapeHtml(dateStr)}">
                         <span class="cal-date-num">${day}</span>
                     </div>
                 `;
@@ -242,11 +271,11 @@ class Beta10DBUI {
             const unremuneratedMin = Math.max(0, Math.round((workedExtra - remuneratedExtra) * 60));
 
             return `
-                <div class="db-overtime-day-card" data-card-date="${d.date}" id="card-date-${d.date}">
+                <div class="db-overtime-day-card" data-card-date="${escapeHtml(d.date)}" id="card-date-${escapeHtml(d.date)}">
                     <div class="db-ot-day-header">
                         <div class="db-ot-day-title">
                             <span class="db-day-badge">${dayName}</span>
-                            <strong>${formattedDate}</strong>
+                            <strong>${escapeHtml(formattedDate)}</strong>
                         </div>
                         <div class="db-ot-badges-group">
                             <span class="db-extra-badge ${remuneratedExtra > 0 ? 'paid' : 'unpaid'}">💰 +${formatHoursMin(remuneratedExtra)} pagades</span>
@@ -254,7 +283,7 @@ class Beta10DBUI {
                     </div>
                     <div class="db-ot-day-details">
                         <span>🕒 Treballat total: <b>${formatHoursMin(d.worked_hours)}</b></span>
-                        <span>⏱️ Estàndard: <b>${d.standard_hours}h</b></span>
+                        <span>⏱️ Estàndard: <b>${escapeHtml(d.standard_hours)}h</b></span>
                         <span>⏳ Extra real: <b>+${formatHoursMin(workedExtra)}</b></span>
                         <span>💵 Extra remunerat: <b class="highlight-paid">+${formatHoursMin(remuneratedExtra)}</b></span>
                         ${unremuneratedMin > 0 ? `<span class="unremunerated-tag">⚠️ ${unremuneratedMin}m no remunerables</span>` : ''}
@@ -263,7 +292,7 @@ class Beta10DBUI {
                     ${d.observations ? `
                         <div class="db-ot-comment">
                             <span class="db-comment-icon">💬</span>
-                            <span class="db-comment-text">${d.observations}</span>
+                            <span class="db-comment-text">${escapeHtml(d.observations)}</span>
                         </div>
                     ` : ''}
                 </div>
@@ -316,7 +345,7 @@ class Beta10DBUI {
                 <div class="db-calendar-container">
                     <div class="db-cal-nav-bar">
                         <button id="db-cal-prev-month" class="db-cal-nav-btn" title="Mes anterior">◀</button>
-                        <h4 class="db-cal-title">📅 ${formatMonthName(currentMonthData.month)}</h4>
+                        <h4 class="db-cal-title">📅 ${escapeHtml(formatMonthName(currentMonthData.month))}</h4>
                         <button id="db-cal-next-month" class="db-cal-nav-btn" title="Mes següent">▶</button>
                     </div>
                     <div class="db-calendar-grid">
@@ -421,7 +450,7 @@ class Beta10DBUI {
                     <div class="db-pause-header">
                         <div class="db-pause-date-group">
                             <span class="db-day-badge">${dayName}</span>
-                            <strong>${formattedDate}</strong>
+                            <strong>${escapeHtml(formattedDate)}</strong>
                         </div>
                         <span class="db-pause-total-badge">⏱️ Total: ${formatMin(day.total_pause_min)}</span>
                     </div>
@@ -471,13 +500,7 @@ class Beta10DBUI {
             return;
         }
 
-        const formatHoursMin = (decimalHours) => {
-            const h = Math.floor(decimalHours);
-            const m = Math.round((decimalHours % 1) * 60);
-            if (h === 0) return `${m}min`;
-            if (m === 0) return `${h}h`;
-            return `${h}h ${m}min`;
-        };
+        const formatHoursMin = formatHoursMinutes;
 
         const formatTimeOnly = (isoStr) => {
             if (!isoStr) return '--:--';
@@ -495,15 +518,15 @@ class Beta10DBUI {
             const isAnomalousPause = j.pause_minutes > 60;
 
             return `
-                <div class="db-jornada-card" data-jornada-id="${j.id}">
+                <div class="db-jornada-card" data-jornada-id="${escapeHtml(j.id)}">
                     <div class="db-jornada-header">
                         <div>
-                            <strong>${formattedDate}</strong>
-                            <span class="db-jornada-type-badge">${j.type || 'JORNADA'}</span>
+                            <strong>${escapeHtml(formattedDate)}</strong>
+                            <span class="db-jornada-type-badge">${escapeHtml(j.type || 'JORNADA')}</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             ${j.extra_hours > 0 ? `<span class="db-extra-badge">+${formatHoursMin(j.extra_hours)} extra</span>` : '<span class="db-normal-badge">Habitual</span>'}
-                            <button class="db-btn-delete-jornada" data-id="${j.id}" title="Eliminar registre" style="background:none; border:none; color:#ef4444; font-size:14px; cursor:pointer; padding:2px 6px;">🗑️</button>
+                            <button class="db-btn-delete-jornada" data-id="${escapeHtml(j.id)}" title="Eliminar registre" style="background:none; border:none; color:#ef4444; font-size:14px; cursor:pointer; padding:2px 6px;">🗑️</button>
                         </div>
                     </div>
                     <div class="db-jornada-body">
@@ -513,17 +536,17 @@ class Beta10DBUI {
                         </div>
                         <div class="db-j-metric">
                             <span class="db-j-label">Treballat</span>
-                            <span class="db-j-val" id="val-worked-${j.id}">${formatHoursMin(j.worked_hours)}</span>
+                            <span class="db-j-val" id="val-worked-${escapeHtml(j.id)}">${formatHoursMin(j.worked_hours)}</span>
                         </div>
                         <div class="db-j-metric">
                             <span class="db-j-label">Pauses</span>
-                            <span class="db-j-val ${isAnomalousPause ? 'val-anomalous' : ''}" id="val-pause-${j.id}">${Math.round(j.pause_minutes)}m</span>
+                            <span class="db-j-val ${isAnomalousPause ? 'val-anomalous' : ''}" id="val-pause-${escapeHtml(j.id)}">${Math.round(j.pause_minutes)}m</span>
                         </div>
                     </div>
                     ${isAnomalousPause ? `
                         <div style="margin: 8px 0; padding: 8px 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
                             <span style="font-size: 12px; color: #fca5a5;">⚠️ Pausa excessiva (${Math.round(j.pause_minutes)}m detectats per error de xarxa)</span>
-                            <button class="btn-fix-pause" data-id="${j.id}" data-worked="${j.worked_hours}" data-pause="${j.pause_minutes}" style="padding: 4px 10px; background: #22c55e; color: white; border: none; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;">
+                            <button class="btn-fix-pause" data-id="${escapeHtml(j.id)}" data-worked="${escapeHtml(j.worked_hours)}" data-pause="${escapeHtml(j.pause_minutes)}" style="padding: 4px 10px; background: #22c55e; color: white; border: none; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;">
                                 🔧 Corregir a 15 min d'esmorzar
                             </button>
                         </div>
@@ -531,7 +554,7 @@ class Beta10DBUI {
                     ${j.observations ? `
                         <div class="db-ot-comment">
                             <span class="db-comment-icon">💬</span>
-                            <span class="db-comment-text">${j.observations}</span>
+                            <span class="db-comment-text">${escapeHtml(j.observations)}</span>
                         </div>
                     ` : ''}
                 </div>
@@ -599,7 +622,7 @@ class Beta10DBUI {
      * Modal per a afegir manualment una jornada (per si mai es vol registrar ahir o avui)
      */
     openAddManualJornadaModal() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDateString(new Date());
         const modal = document.createElement('div');
         modal.className = 'modal-overlay';
         modal.innerHTML = `
@@ -609,7 +632,7 @@ class Beta10DBUI {
                 
                 <div style="display:flex;flex-direction:column;gap:10px;margin:15px 0;">
                     <label style="font-size:13px;font-weight:600;">Data:
-                        <input type="date" id="man-date" value="${today}" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                        <input type="date" id="man-date" value="${escapeHtml(today)}" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
                     </label>
                     <div style="display:flex;gap:10px;">
                         <label style="flex:1;font-size:13px;font-weight:600;">Inici (HH:MM):
@@ -660,20 +683,26 @@ class Beta10DBUI {
             const endTime = new Date(`${dateVal}T${endVal || '17:00'}:00`);
             const remExtra = Math.floor((extraVal + 0.0001) / 0.5) * 0.5;
 
-            await window.beta10DB.recordJornada({
-                user: 'usuari',
-                date: dateVal,
-                startTime,
-                endTime,
-                type: 'JORNADA',
-                dayType: 'Manual',
-                standardHours: 9,
-                workedHours: workedVal,
-                extraHours: extraVal,
-                remuneratedExtraHours: remExtra,
-                pauseMinutes: 30,
-                observations: obsVal || '[Jornada afegida manualment]'
-            });
+            try {
+                await window.beta10DB.recordJornada({
+                    user: 'usuari',
+                    date: dateVal,
+                    startTime,
+                    endTime,
+                    type: 'JORNADA',
+                    dayType: 'Manual',
+                    standardHours: 9,
+                    workedHours: workedVal,
+                    extraHours: extraVal,
+                    remuneratedExtraHours: remExtra,
+                    pauseMinutes: 30,
+                    observations: obsVal || '[Jornada afegida manualment]'
+                });
+            } catch (err) {
+                // A2: si no s'ha pogut persistir, l'usuari ho ha de saber (i el modal es manté obert)
+                alert('❌ No s\'ha pogut desar la jornada: ' + (err && err.message ? err.message : err));
+                return;
+            }
 
             modal.remove();
             alert('✅ Jornada desada correctament a la base de dades!');
@@ -682,10 +711,91 @@ class Beta10DBUI {
     }
 
     /**
+     * Modal amb textarea (M12) per mostrar/copiar la còpia en Base64 quan el portapapers
+     * no és disponible. Si no es passa text, es genera.
+     */
+    async openBackupTextModal(text) {
+        let b64 = text;
+        if (!b64) {
+            b64 = await window.beta10DB.exportDatabaseAsBase64();
+        }
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 460px; text-align: left;">
+                <h3 style="margin-top:0;">📋 Còpia de seguretat (text)</h3>
+                <p class="modal-subtitle">Copia tot aquest text i desa'l (Notes, correu, WhatsApp...). Serveix per restaurar-lo més endavant.</p>
+                <textarea id="backup-text-area" readonly style="width:100%;height:160px;font-family:monospace;font-size:11px;"></textarea>
+                <div class="modal-buttons" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+                    <button class="btn btn-secondary" id="btn-backup-text-close">Tancar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const area = modal.querySelector('#backup-text-area');
+        if (area) {
+            area.value = b64;
+            if (typeof area.select === 'function') area.select();
+        }
+        const closeBtn = modal.querySelector('#btn-backup-text-close');
+        if (closeBtn) closeBtn.onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+        return modal;
+    }
+
+    /**
+     * Modal amb textarea (M12) per restaurar des del text Base64, amb confirmació explícita (A4).
+     */
+    openRestoreTextModal() {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 460px; text-align: left;">
+                <h3 style="margin-top:0;">📋 Restaurar des de text</h3>
+                <p class="modal-subtitle">Enganxa aquí el text de la còpia de seguretat (Base64). Substituirà TOTES les dades actuals.</p>
+                <textarea id="restore-text-area" placeholder="Enganxa aquí la còpia..." style="width:100%;height:160px;font-family:monospace;font-size:11px;"></textarea>
+                <div class="modal-buttons" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+                    <button class="btn btn-secondary" id="btn-restore-text-cancel">Cancel·lar</button>
+                    <button class="btn btn-start" id="btn-restore-text-confirm">Restaurar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('#btn-restore-text-cancel').onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+        modal.querySelector('#btn-restore-text-confirm').onclick = async () => {
+            const text = (modal.querySelector('#restore-text-area').value || '').trim();
+            if (!text) {
+                alert('Enganxa primer el text de la còpia de seguretat.');
+                return;
+            }
+            // A4: la restauració per text també demana confirmació (igual que la de fitxer)
+            if (!confirm('Vols restaurar la base de dades des d\'aquest text? Les dades actuals es substituiran (podràs desfer-ho des de la pestanya SQLite).')) {
+                return;
+            }
+            try {
+                await window.beta10DB.importDatabaseFromBase64(text);
+                modal.remove();
+                alert('✅ Base de dades restaurada correctament des del text! Totes les jornades i hores extra s\'han recuperat.');
+                await this.renderActiveTab();
+            } catch (e) {
+                alert('❌ Error restaurant des de text: ' + e.message);
+            }
+        };
+        return modal;
+    }
+
+    /**
      * PESTANYA 4: Gestió Base de Dades SQLite
      */
     async renderDatabaseTab(container) {
         const stats = await window.beta10DB.getDatabaseStats();
+        let hasSnapshot = false;
+        try {
+            hasSnapshot = typeof window.beta10DB.hasRestoreSnapshot === 'function' && await window.beta10DB.hasRestoreSnapshot();
+        } catch (e) { hasSnapshot = false; }
 
         container.innerHTML = `
             <div class="db-manage-container">
@@ -741,6 +851,12 @@ class Beta10DBUI {
                         </button>
                         <input type="file" id="db-file-input" accept=".sqlite,.db" style="display: none;" />
                     </div>
+                    ${hasSnapshot ? `
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-secondary" id="db-undo-restore-btn" style="width: 100%;">
+                            ↩️ Desfer l'última restauració
+                        </button>
+                    </div>` : ''}
                 </div>
             </div>
         `;
@@ -754,8 +870,20 @@ class Beta10DBUI {
                     const res = await window.beta10DB.downloadDatabaseFile();
                     if (res && res.method === 'share') {
                         // Obert menú natiu de compartir / desar d'Android
+                    } else if (res && res.method === 'capacitor_share') {
+                        // Obert el full de compartir natiu
+                    } else if (res && res.method === 'cancelled_by_user') {
+                        // L'usuari ha tancat el menú de compartir
+                    } else if (res && res.success === false) {
+                        // A5: no es pot descarregar directament (APK sense plugin de compartir)
+                        if (res.needsBase64) {
+                            alert('⚠️ ' + res.error + '\n\nS\'obrirà la còpia en text perquè la puguis copiar o compartir.');
+                            await this.openBackupTextModal();
+                        } else {
+                            alert('❌ No s\'ha pogut generar la còpia: ' + (res.error || 'error desconegut'));
+                        }
                     } else {
-                        alert('✅ Còpia de seguretat .sqlite preparada per a la descàrrega!');
+                        alert('✅ S\'ha iniciat la descàrrega de la còpia de seguretat .sqlite. Comprova la carpeta Descàrregues.');
                     }
                 } catch (e) {
                     alert('Error en descarregar: ' + e.message);
@@ -772,11 +900,16 @@ class Beta10DBUI {
                 try {
                     const b64 = await window.beta10DB.exportDatabaseAsBase64();
                     if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(b64);
-                        alert('✅ Còpia de seguretat copiada al portapapers en text! Pots enganxar-la a WhatsApp, Bloc de notes o correu per a guardar-la.');
-                    } else {
-                        prompt('Copia aquest text per desar la teva còpia de seguretat:', b64);
+                        try {
+                            await navigator.clipboard.writeText(b64);
+                            alert('✅ Còpia de seguretat copiada al portapapers en text! Pots enganxar-la a WhatsApp, Bloc de notes o correu per a guardar-la.');
+                            return;
+                        } catch (clipErr) {
+                            console.warn('Portapapers no disponible, mostrant el text:', clipErr);
+                        }
                     }
+                    // M12: en lloc de prompt() (límit de longitud i inutilitzable al WebView), un modal amb textarea
+                    this.openBackupTextModal(b64);
                 } catch (e) {
                     alert('Error en copiar: ' + e.message);
                 }
@@ -785,16 +918,19 @@ class Beta10DBUI {
 
         const restoreTextBtn = container.querySelector('#db-restore-text-btn');
         if (restoreTextBtn) {
-            restoreTextBtn.onclick = async () => {
-                const text = prompt('Enganxa aquí el text de la còpia de seguretat (Base64) que vas copiar anteriorment:');
-                if (!text || !text.trim()) return;
+            restoreTextBtn.onclick = () => this.openRestoreTextModal();
+        }
 
+        const undoBtn = container.querySelector('#db-undo-restore-btn');
+        if (undoBtn) {
+            undoBtn.onclick = async () => {
+                if (!confirm('Vols desfer l\'última restauració i tornar a les dades que tenies abans?')) return;
                 try {
-                    await window.beta10DB.importDatabaseFromBase64(text);
-                    alert('✅ Base de dades restaurada correctament des del text! Totes les jornades i hores extra s\'han recuperat.');
+                    await window.beta10DB.undoLastRestore();
+                    alert('✅ S\'han recuperat les dades anteriors a la restauració.');
                     await this.renderActiveTab();
                 } catch (e) {
-                    alert('❌ Error restaurant des de text: ' + e.message);
+                    alert('❌ No s\'ha pogut desfer la restauració: ' + e.message);
                 }
             };
         }

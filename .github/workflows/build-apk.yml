@@ -27,6 +27,9 @@ jobs:
       - name: 📦 Instal·lar dependències
         run: npm install
 
+      - name: 🧪 Executar tests (0 fallades requerit)
+        run: npm test
+
       - name: 🏗️ Empaquetar web a www/
         run: npm run build
 

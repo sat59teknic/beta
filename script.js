@@ -83,25 +83,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         return `${year}-${month}-${day}`;
     }
 
-    let appState = {
-        currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
-        workStartTime: null,
-        currentPauseStart: null,
-        currentPauseType: null, // 'esmorçar' o 'dinar'
-        totalPauseTimeToday: 0,
-        currentLocation: null,
-        isAlarmPlaying: false,
-        pauseAlarmTriggered: false,
-        lastAlarmTime: null, // 🔧 Para permitir alarmas recurrentes
-        alarmSource: null, // 🐛 FIX: Tracking de fuente de alarma ('local' o 'service-worker')
-        wakeLock: null, // Para mantener pantalla activa
-        wakeLockLost: false, // 🐛 FIX: Flag para detectar si se perdió el wake lock
-        // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
-        workDayStandard: null, // 8 o 9 según el día
-        workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
-        workStartDay: null,    // Día de inicio de jornada
-        breakfastDate: null    // Data (YYYY-MM-DD) del darrer esmorzar realitzat avui
-    };
+    // M11: tot text d'usuari / de la BD que acabi dins d'un innerHTML s'ha d'escapar.
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // L3: arrodonir PRIMER a minuts totals evita sortides com "8h 60min".
+    function formatHoursMinutes(decimalHours) {
+        const totalMin = Math.max(0, Math.round((Number(decimalHours) || 0) * 60));
+        return `${Math.floor(totalMin / 60)}h ${totalMin % 60}min`;
+    }
+
+    function createDefaultState() {
+        return {
+            currentState: 'FUERA', // FUERA, JORNADA, PAUSA, ALMACEN
+            workStartTime: null,
+            currentPauseStart: null,
+            currentPauseType: null, // 'esmorçar' o 'dinar'
+            totalPauseTimeToday: 0,
+            currentLocation: null,
+            isAlarmPlaying: false,
+            pauseAlarmTriggered: false,
+            lastAlarmTime: null, // 🔧 Para permitir alarmas recurrentes
+            alarmSource: null, // 🐛 FIX: Tracking de fuente de alarma ('local' o 'service-worker')
+            wakeLock: null, // Para mantener pantalla activa
+            wakeLockLost: false, // 🐛 FIX: Flag para detectar si se perdió el wake lock
+            // 🆕 NUEVOS CAMPOS PARA HORARIOS DINÁMICOS
+            workDayStandard: null, // 8 o 9 según el día
+            workDayType: null,     // "Divendres", "Dilluns-Dijous", "Dissabte"
+            workStartDay: null,    // Día de inicio de jornada
+            breakfastDate: null    // Data (YYYY-MM-DD) del darrer esmorzar realitzat avui
+        };
+    }
+
+    let appState = createDefaultState();
+
+    // M14: camps que descriuen l'estat d'aquesta sessió (so en marxa, wake lock...) i que
+    // NO s'han de persistir: si l'app es tanca mentre sona, en reobrir quedaria
+    // isAlarmPlaying=true i totes les alarmes següents s'ignorarien.
+    const TRANSIENT_STATE_KEYS = ['isAlarmPlaying', 'wakeLock', 'wakeLockLost', 'alarmSource'];
+    const STATE_STORAGE_KEY = 'beta10AppState';
+    const CORRUPT_STATE_STORAGE_KEY = 'beta10AppState_corrupt';
 
     // 🔧 Variable para detectar cambios de estado y evitar regeneración innecesaria de botones
     let lastKnownState = null;
@@ -110,13 +137,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     let alarmIntervalGlobal = null;
 
     function saveState() {
-        localStorage.setItem('beta10AppState', JSON.stringify(appState));
+        try {
+            const persistable = { ...appState };
+            TRANSIENT_STATE_KEYS.forEach(key => { delete persistable[key]; });
+            localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(persistable));
+        } catch (e) {
+            // localStorage ple o bloquejat: no ha de tombar el flux de fitxatge
+            console.warn('⚠️ No s\'ha pogut desar l\'estat:', e);
+        }
     }
 
     function loadState() {
-        const savedState = localStorage.getItem('beta10AppState');
+        const savedState = localStorage.getItem(STATE_STORAGE_KEY);
         if (savedState) {
-            const parsedState = JSON.parse(savedState);
+            let parsedState = null;
+            try {
+                parsedState = JSON.parse(savedState);
+            } catch (e) {
+                parsedState = null;
+            }
+
+            // M14: JSON il·legible o amb forma inesperada -> arrencar en FUERA conservant una còpia
+            if (!parsedState || typeof parsedState !== 'object' || Array.isArray(parsedState)) {
+                try {
+                    localStorage.setItem(CORRUPT_STATE_STORAGE_KEY, savedState);
+                    localStorage.removeItem(STATE_STORAGE_KEY);
+                } catch (e) {}
+                appState = createDefaultState();
+                logActivity('⚠️ L\'estat desat era il·legible: s\'ha guardat una còpia (beta10AppState_corrupt) i s\'ha reiniciat a Fora de Jornada');
+                lastKnownState = appState.currentState;
+                return;
+            }
 
             // 🚨 BUG FIX #2: VALIDAR timestamps antes de usar
             const workStartTime = parsedState.workStartTime ? new Date(parsedState.workStartTime) : null;
@@ -128,18 +179,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             const isValidPauseStart = currentPauseStart && !isNaN(currentPauseStart.getTime());
             const isValidAlarmTime = lastAlarmTime && !isNaN(lastAlarmTime.getTime());
 
+            const pauseTotal = Number(parsedState.totalPauseTimeToday);
+
             // Convertir strings de fecha a objetos Date
             appState = {
+                ...createDefaultState(),
                 ...parsedState,
                 workStartTime: isValidWorkStart ? workStartTime : null,
                 currentPauseStart: isValidPauseStart ? currentPauseStart : null,
                 currentPauseType: parsedState.currentPauseType || null,
                 lastAlarmTime: isValidAlarmTime ? lastAlarmTime : null,
+                totalPauseTimeToday: Number.isFinite(pauseTotal) && pauseTotal >= 0 ? pauseTotal : 0,
                 // 🆕 MANTENER HORARIO DINÁMICO
-                workDayStandard: parsedState.workDayStandard || null,
+                workDayStandard: parsedState.workDayStandard ?? null,
                 workDayType: parsedState.workDayType || null,
-                workStartDay: parsedState.workStartDay || null,
-                breakfastDate: parsedState.breakfastDate || null
+                workStartDay: parsedState.workStartDay ?? null,
+                breakfastDate: parsedState.breakfastDate || null,
+                // Camps transitoris: sempre net en carregar (versions antigues els persistien)
+                isAlarmPlaying: false,
+                alarmSource: null,
+                wakeLock: null,
+                wakeLockLost: false
             };
 
             // LOG si hay timestamps inválidos
@@ -159,7 +219,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 🔧 Inicializar lastKnownState después de cargar el estado
         lastKnownState = appState.currentState;
     }
-    
+
     function logActivity(message) {
         const now = new Date().toLocaleTimeString('es-ES');
         const p = document.createElement('p');
@@ -238,50 +298,81 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // Función para mostrar errores traducidos
+    // M9: un mateix error es mostra UNA sola vegada encara que travessi diverses capes
+    // (getCurrentLocation -> sendToProxy -> handleAction -> startPause...).
     function showTranslatedError(error) {
         const translatedMessage = translateError(error);
+        if (error && typeof error === 'object') {
+            if (error.__shown) return;
+            try { error.__shown = true; } catch (e) {}
+        }
         alert(translatedMessage);
         logActivity(`❌ ERROR: ${translatedMessage}`);
     }
-    
+
     function showLoading(visible, text = 'Processant...') {
         dom.loadingText.textContent = text;
         dom.loadingOverlay.classList.toggle('visible', visible);
     }
 
+    // M9: si el GPS falla però tenim una posició recent (< 15 min), es pot fitxar amb ella
+    const LAST_LOCATION_MAX_AGE_MS = 15 * 60 * 1000;
+
+    function getRecentLocation() {
+        const loc = appState.currentLocation;
+        if (!loc) return null;
+        const lat = Number(loc.latitude);
+        const lon = Number(loc.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const ts = loc.timestamp ? new Date(loc.timestamp).getTime() : NaN;
+        if (!Number.isFinite(ts)) return null;
+        const age = Date.now() - ts;
+        return age >= 0 && age <= LAST_LOCATION_MAX_AGE_MS ? loc : null;
+    }
+
+    // NOTA: getCurrentLocation ja NO mostra cap alert (abans en mostrava un a cada capa i un
+    // més a l'arrencada automàtica). Qui la crida decideix si cal avisar l'usuari.
     async function getCurrentLocation() {
         showLoading(true, 'Obtenint GPS...');
         dom.gpsStatus.className = 'status-indicator yellow';
         return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
+            const fail = (error) => {
+                showLoading(false);
+                const recent = getRecentLocation();
+                if (recent) {
+                    const ageMin = Math.max(0, Math.round((Date.now() - new Date(recent.timestamp).getTime()) / 60000));
+                    dom.gpsStatus.className = 'status-indicator yellow';
+                    logActivity(`⚠️ GPS no disponible (${translateError(error)}). S'usa l'última posició coneguda (fa ${ageMin} min).`);
+                    resolve(recent);
+                    return;
+                }
                 dom.gpsStatus.className = 'status-indicator red';
-                const error = new Error('GPS no suportat pel navegador.');
-                showTranslatedError(error);
-                return reject(error);
+                reject(error);
+            };
+
+            if (!navigator.geolocation) {
+                fail(new Error('GPS no suportat pel navegador.'));
+                return;
             }
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    appState.currentLocation = {
+                    const location = {
                         latitude: position.coords.latitude,
                         longitude: position.coords.longitude,
                         accuracy: position.coords.accuracy,
                         timestamp: new Date().toISOString()
                     };
-                    if (isNaN(appState.currentLocation.latitude)) {
-                        dom.gpsStatus.className = 'status-indicator red';
-                        const error = new Error('Coordenades GPS invàlides.');
-                        showTranslatedError(error);
-                        return reject(error);
+                    if (!Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) {
+                        fail(new Error('Coordenades GPS invàlides.'));
+                        return;
                     }
+                    appState.currentLocation = location;
+                    showLoading(false);
                     dom.gpsStatus.className = 'status-indicator green';
-                    logActivity(`GPS OK: ${appState.currentLocation.latitude.toFixed(4)}, ${appState.currentLocation.longitude.toFixed(4)}`);
-                    resolve(appState.currentLocation);
+                    logActivity(`GPS OK: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`);
+                    resolve(location);
                 },
-                (error) => {
-                    dom.gpsStatus.className = 'status-indicator red';
-                    showTranslatedError(error);
-                    reject(error);
-                },
+                (error) => fail(error),
                 { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
             );
         });
@@ -373,32 +464,32 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                         <div class="overtime-grid">
                             <div class="overtime-item">
-                                <span class="ot-label">Total Treballat</span>
-                                <span class="ot-value">${overtimeDetails.totalHoursFormatted}</span>
+                                <span class="ot-label">Total Jornada (amb pauses)</span>
+                                <span class="ot-value">${escapeHtml(overtimeDetails.totalHoursFormatted)}</span>
                             </div>
                             <div class="overtime-item">
                                 <span class="ot-label">Estàndard</span>
-                                <span class="ot-value">${overtimeDetails.standardFormatted}</span>
+                                <span class="ot-value">${escapeHtml(overtimeDetails.standardFormatted)}</span>
                             </div>
                             <div class="overtime-item highlight">
                                 <span class="ot-label">Hores Extra</span>
-                                <span class="ot-value extra">${overtimeDetails.extraText}</span>
+                                <span class="ot-value extra">${escapeHtml(overtimeDetails.extraText)}</span>
                             </div>
                         </div>
-                        <p class="overtime-note">⚠️ Has superat la jornada habitual en més de 30 minuts. Has d'indicar el motiu o feina realitzada obligatòriament.</p>
+                        <p class="overtime-note">⚠️ Has superat la jornada habitual en més de 30 minuts (el total inclou el temps de pauses). Has d'indicar el motiu o feina realitzada obligatòriament.</p>
                     </div>
                 `;
             }
 
             modal.innerHTML = `
                 <div class="modal-content">
-                    <h3>${title}</h3>
-                    ${subtitle ? `<p class="modal-subtitle">${subtitle}</p>` : ''}
+                    <h3>${escapeHtml(title)}</h3>
+                    ${subtitle ? `<p class="modal-subtitle">${escapeHtml(subtitle)}</p>` : ''}
                     ${overtimeHtml}
-                    <textarea id="observations-input" placeholder="${placeholder}" maxlength="250">${defaultValue}</textarea>
+                    <textarea id="observations-input" placeholder="${escapeHtml(placeholder)}" maxlength="250">${escapeHtml(defaultValue)}</textarea>
                     <div class="modal-buttons">
-                        <button type="button" class="btn btn-secondary" id="modal-cancel-btn">${effectiveCancelText}</button>
-                        <button type="button" class="btn btn-start" id="modal-confirm-btn">${confirmText}</button>
+                        <button type="button" class="btn btn-secondary" id="modal-cancel-btn">${escapeHtml(effectiveCancelText)}</button>
+                        <button type="button" class="btn btn-start" id="modal-confirm-btn">${escapeHtml(confirmText)}</button>
                     </div>
                 </div>
             `;
@@ -536,57 +627,80 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     // Detectar si son horas extra con horario dinámico
-    function calculateExtraHours() {
-        if (!appState.workStartTime) return { 
-            extraHours: 0, 
+    //
+    // FÒRMULA (M1, decisió consolidada - NO canviar sense parlar-ne amb l'usuari):
+    //   jornada total = temps transcorregut des de l'inici (INCLOU les pauses, esmorzar/dinar).
+    //   extra real    = max(0, jornada total - horari estàndard del dia)   (cap de setmana: tot és extra)
+    //   remunerada    = blocs complets de 30 min de l'extra real, PER DIA (floor(extra / 0.5) * 0.5)
+    // Les pauses NO es resten de la jornada total a l'hora de calcular l'extra; sí que es resten
+    // del "treballat" (workedHours) que es desa a SQLite.
+    //
+    // M2: en estat PAUSA la pausa en curs ja forma part del temps transcorregut; abans es
+    // tornava a sumar i la jornada total sortia inflada.
+    // `at` permet calcular amb un instant fix (M4: es calcula una sola vegada en finalitzar).
+    function calculateExtraHours(at = null) {
+        const empty = {
+            extraHours: 0,
             workedExtraHours: 0,
             remuneratedExtraHours: 0,
-            totalHours: 0, 
-            extraBlocks: 0, 
-            standardWorkDay: 9 
+            totalHours: 0,
+            extraBlocks: 0,
+            standardWorkDay: 9
         };
-        
-        const now = new Date();
-        const workDuration = now - appState.workStartTime - appState.totalPauseTimeToday;
-        let currentPauseDuration = 0;
-        
-        if (appState.currentState === 'PAUSA' && appState.currentPauseStart) {
-            currentPauseDuration = now - appState.currentPauseStart;
-        }
-        
-        // Tiempo total de jornada = tiempo trabajado + tiempo de pausa
-        const totalWorkTime = workDuration / (1000 * 60 * 60); // Solo tiempo trabajado
-        const totalPauseTime = (appState.totalPauseTimeToday + currentPauseDuration) / (1000 * 60 * 60);
-        const totalJourneyTime = totalWorkTime + totalPauseTime; // Jornada completa
-        
-        // 🆕 USAR HORARIO DINÁMICO (nullish coalescing para soportar 0)
-        const standardWorkDay = appState.workDayStandard ?? 9;
-        const extraTime = Math.max(0, totalJourneyTime - standardWorkDay);
-        
+        const start = appState.workStartTime ? new Date(appState.workStartTime) : null;
+        if (!start || isNaN(start.getTime())) return empty;
+
+        const now = at ? new Date(at) : new Date();
+        const elapsedMs = now - start;
+        if (!Number.isFinite(elapsedMs)) return empty;
+
+        const totalJourneyTime = Math.max(0, elapsedMs) / (1000 * 60 * 60);
+
+        // 🆕 USAR HORARIO DINÁMICO (0 és un valor vàlid: cap de setmana)
+        const rawStandard = appState.workDayStandard;
+        const standardWorkDay = (rawStandard === null || rawStandard === undefined || !Number.isFinite(Number(rawStandard)))
+            ? 9
+            : Number(rawStandard);
+
         // Horas extra reales trabajadas (efectivas)
-        let workedExtraHours = 0;
-        if (standardWorkDay === 0) {
-            // Fin de semana: toda la jornada computa como tiempo extra
-            workedExtraHours = totalJourneyTime;
-        } else {
-            workedExtraHours = extraTime;
-        }
-        
+        const workedExtraHours = standardWorkDay === 0
+            ? totalJourneyTime // Fin de semana: toda la jornada computa como tiempo extra
+            : Math.max(0, totalJourneyTime - standardWorkDay);
+
         // Horas extra remuneradas: solo se computan y pagan bloques completos de 30 minutos (0.5h) por día
         // Si es < 30 min (ej. 23 min) = 0h remuneradas
         // Si es >= 30 min (ej. 45 min) = 0.5h remuneradas (los 15 min restantes no se pagan ni acumulan)
         // Se reinicia cada día de forma independiente
         const extraBlocks = Math.floor((workedExtraHours + 0.0001) / 0.5);
         const remuneratedExtraHours = extraBlocks * 0.5;
-        
-        return { 
-            extraHours: workedExtraHours, 
+
+        return {
+            extraHours: workedExtraHours,
             workedExtraHours: workedExtraHours,
             remuneratedExtraHours: remuneratedExtraHours,
             totalHours: totalJourneyTime,
             extraBlocks: extraBlocks,
             standardWorkDay: standardWorkDay
         };
+    }
+
+    // Textos i decisions derivades d'un resultat de calculateExtraHours (una sola font de veritat)
+    function buildOvertimeInfo(extraInfo) {
+        const standardWorkDay = extraInfo.standardWorkDay;
+        const dayType = appState.workDayType || getDayTypeName(new Date());
+        const totalHoursFormatted = formatHoursMinutes(extraInfo.totalHours);
+        const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
+
+        let extraText = '';
+        let hasOvertime = false;
+        if (extraInfo.remuneratedExtraHours >= 0.5) {
+            hasOvertime = true;
+            const extraBlocks = extraInfo.extraBlocks;
+            const hours = Math.floor(extraBlocks / 2);
+            const mins = (extraBlocks % 2) * 30;
+            extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
+        }
+        return { standardWorkDay, dayType, totalHoursFormatted, standardFormatted, extraText, hasOvertime };
     }
 
     // --- FUNCIONES DE AUTENTICACIÓN ---
@@ -605,30 +719,128 @@ document.addEventListener('DOMContentLoaded', async () => {
         header.insertBefore(accountBtn, gpsStatus);
     }
 
+    // --- COA D'ESCRIPTURES PENDENTS A SQLITE (A3) ---
+    // Si guardar a SQLite falla (IndexedDB ple/bloquejat...), l'escriptura es desa aquí
+    // (localStorage) i es reintenta quan la BD torna a estar disponible.
+    const PENDING_DB_KEY = 'beta10_pending_db_writes';
+    const PENDING_DB_MAX = 500;
+    const DB_WRITE_METHODS = { jornada: 'recordJornada', pausa: 'recordPausa', fichaje: 'recordFichaje' };
+    let dbQueueFlushing = false;
+
+    function readDbQueue() {
+        try {
+            const raw = localStorage.getItem(PENDING_DB_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function writeDbQueue(list) {
+        try {
+            if (!list || list.length === 0) localStorage.removeItem(PENDING_DB_KEY);
+            else localStorage.setItem(PENDING_DB_KEY, JSON.stringify(list.slice(-PENDING_DB_MAX)));
+        } catch (e) {
+            console.warn('⚠️ No s\'ha pogut desar la coa de pendents a SQLite:', e);
+        }
+    }
+
+    function queueDbWrite(kind, payload, error) {
+        const list = readDbQueue();
+        list.push({
+            kind,
+            payload,
+            queuedAt: new Date().toISOString(),
+            error: String((error && error.message) || error || '')
+        });
+        writeDbQueue(list);
+    }
+
+    /**
+     * Escriu a SQLite. Retorna true si s'ha desat, false si ha fallat i ha quedat a la coa,
+     * null si no hi ha base de dades disponible.
+     * @param {{notifyUser?: boolean}} options notifyUser: avisar amb un alert (dades que no es poden perdre)
+     */
+    async function recordDb(kind, payload, options = {}) {
+        const db = window.beta10DB;
+        const method = DB_WRITE_METHODS[kind];
+        if (!db || typeof db[method] !== 'function') return null;
+        try {
+            await db[method](payload);
+            return true;
+        } catch (error) {
+            queueDbWrite(kind, payload, error);
+            logActivity(`❌ Error SQLite (${kind}): ${error.message}. L'escriptura ha quedat en cua i es reintentarà.`);
+            if (options.notifyUser) {
+                alert(`⚠️ No s'ha pogut desar la ${kind} a la base de dades local (${error.message}).\nHa quedat en cua i es reintentarà automàticament; no tanquis la sessió d'aquest dispositiu fins que es desi.`);
+            }
+            return false;
+        }
+    }
+
+    async function flushDbQueue() {
+        const db = window.beta10DB;
+        if (!db || dbQueueFlushing) return 0;
+        dbQueueFlushing = true;
+        let done = 0;
+        try {
+            let list = readDbQueue();
+            while (list.length > 0) {
+                const item = list[0];
+                const method = DB_WRITE_METHODS[item.kind];
+                if (typeof db[method] !== 'function') { list.shift(); writeDbQueue(list); continue; }
+                try {
+                    await db[method](item.payload);
+                } catch (error) {
+                    logActivity(`⚠️ Reintent SQLite fallit (${item.kind}): ${error.message}`);
+                    break;
+                }
+                list.shift();
+                writeDbQueue(list);
+                done++;
+            }
+            if (done > 0) logActivity(`💾 ${done} escriptura(es) pendent(s) desades a SQLite`);
+        } finally {
+            dbQueueFlushing = false;
+        }
+        return done;
+    }
+
     // --- GESTIÓ DE SINCRONITZACIÓ PENDENT (OFFLINE RETRY MANAGER) ---
+    // M8: la cua admet VARIS pendents (abans el segon sobreescrivia el primer) i cada acció
+    // guarda la seva hora original.
     const PENDING_SYNC_KEY = 'beta10_pending_sync';
+    let pendingSyncInFlight = false;
 
     function getPendingSync() {
         try {
             const raw = localStorage.getItem(PENDING_SYNC_KEY);
-            return raw ? JSON.parse(raw) : null;
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const list = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? [parsed] : []);
+            return list.length > 0 ? list : null;
         } catch (e) {
             return null;
         }
     }
 
-    function savePendingSync(data) {
+    function writePendingSync(list) {
         try {
-            localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(data));
-            renderPendingSyncBanner();
+            if (!list || list.length === 0) localStorage.removeItem(PENDING_SYNC_KEY);
+            else localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(list));
         } catch (e) {}
+        renderPendingSyncBanner();
+    }
+
+    function savePendingSync(entry) {
+        const list = getPendingSync() || [];
+        list.push(entry);
+        writePendingSync(list);
     }
 
     function clearPendingSync() {
-        try {
-            localStorage.removeItem(PENDING_SYNC_KEY);
-            renderPendingSyncBanner();
-        } catch (e) {}
+        writePendingSync([]);
     }
 
     function renderPendingSyncBanner() {
@@ -650,13 +862,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
+        const extraCount = pending.length > 1 ? ` (+${pending.length - 1} més)` : '';
         banner.style.display = 'flex';
         banner.innerHTML = `
             <div class="pending-sync-info">
                 <span class="pending-sync-icon">📡</span>
                 <div class="pending-sync-text">
                     <strong>Fitxatge pendent de sincronitzar</strong>
-                    <span>${pending.title || 'Tornada de Pausa'} (sense cobertura quan es va prémer)</span>
+                    <span>${escapeHtml(pending[0].title || 'Tornada de Pausa')}${escapeHtml(extraCount)} (sense cobertura quan es va prémer)</span>
                 </div>
             </div>
             <button id="btn-retry-pending-sync" class="btn-retry-sync" type="button">
@@ -673,19 +886,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // El servidor Beta10 posa la seva pròpia hora; si el fitxatge es reenvia tard, es deixa
+    // constància de l'hora original a les observacions.
+    function withOriginalTime(observations, isoTimestamp) {
+        const when = isoTimestamp ? new Date(isoTimestamp) : null;
+        if (!when || isNaN(when.getTime()) || (Date.now() - when.getTime()) < 2 * 60 * 1000) {
+            return observations || '';
+        }
+        const hh = String(when.getHours()).padStart(2, '0');
+        const mm = String(when.getMinutes()).padStart(2, '0');
+        const dd = String(when.getDate()).padStart(2, '0');
+        const mo = String(when.getMonth() + 1).padStart(2, '0');
+        const note = `[Fitxatge fet a les ${hh}:${mm} del ${dd}/${mo}]`;
+        return observations ? `${observations} ${note}` : note;
+    }
+
     async function executePendingSync() {
-        const pending = getPendingSync();
-        if (!pending || !pending.actions) return;
+        const list = getPendingSync();
+        if (!list || pendingSyncInFlight) return;
+        pendingSyncInFlight = true;
 
         showLoading(true, 'Sincronitzant fitxatges pendents...');
         logActivity('🔄 Intentant sincronitzar fitxatges pendents amb Beta10...');
 
         try {
             await getCurrentLocation();
-            for (const act of pending.actions) {
-                await sendToProxy(act.action, act.point, act.observations || '');
+            while (list.length > 0) {
+                const entry = list[0];
+                const actions = Array.isArray(entry.actions) ? entry.actions : [];
+                while (actions.length > 0) {
+                    const act = actions[0];
+                    const when = act.timestamp || entry.timestamp;
+                    await sendToProxy(act.action, act.point, withOriginalTime(act.observations || '', when), { timestamp: when });
+                    // Cada acció enviada s'esborra de la cua a l'acte: un reintent no la duplica
+                    actions.shift();
+                    writePendingSync(list);
+                }
+                list.shift();
+                writePendingSync(list);
             }
-            clearPendingSync();
             logActivity('✅ Fitxatges pendents sincronitzats correctament amb Beta10');
             if (dom.infoMessage) {
                 dom.infoMessage.textContent = '✅ Sincronització amb Beta10 completada';
@@ -701,17 +940,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             logActivity(`⚠️ Encara sense connexió amb Beta10: ${err.message}`);
             showTranslatedError(err);
         } finally {
+            pendingSyncInFlight = false;
             showLoading(false);
         }
     }
 
-    async function sendToProxy(action, point, observations = '') {
+    async function sendToProxy(action, point, observations = '', options = {}) {
         if (!appState.currentLocation) {
             const error = new Error('Ubicació GPS no disponible.');
             showTranslatedError(error);
             throw error;
         }
-        
+
         // 🔐 OBTENER CREDENCIALES DEL USUARIO (LOCAL O SERVIDOR)
         const credentials = authManager.getCredentials();
         if (!credentials && !hasServerAuth) {
@@ -719,11 +959,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             showTranslatedError(error);
             throw error;
         }
-        
+
         const startTime = performance.now();
         showLoading(true, `Registrant ${action} (${point})...`);
         dom.connectionStatus.className = 'status-indicator yellow';
-        
+
         try {
             let result;
             if (typeof Beta10Direct !== 'undefined' && Beta10Direct.isNative()) {
@@ -751,26 +991,24 @@ document.addEventListener('DOMContentLoaded', async () => {
                     throw error;
                 }
             }
-            
+
             const duration = Math.round(performance.now() - startTime);
             dom.connectionStatus.className = 'status-indicator green';
             const obsText = observations ? ` - Obs: ${observations.substring(0, 30)}...` : '';
             const activeUser = credentials?.username || result.user || 'servidor';
             const userText = ` [${activeUser}]`;
             logActivity(`✅ Beta10 OK (${duration}ms): ${action} con punto '${point}' registrado${obsText}${userText}`);
-            
-            // 💾 Registrar fitxatge a la base de dades SQLite local
-            if (window.beta10DB) {
-                window.beta10DB.recordFichaje({
-                    user: activeUser,
-                    timestamp: new Date().toISOString(),
-                    action: action,
-                    point: point,
-                    observations: observations,
-                    latitude: appState.currentLocation?.latitude,
-                    longitude: appState.currentLocation?.longitude
-                }).catch(e => console.warn('⚠️ Error gravant fitxatge a SQLite:', e));
-            }
+
+            // 💾 Registrar fitxatge a la base de dades SQLite local (sense bloquejar el fitxatge)
+            recordDb('fichaje', {
+                user: activeUser,
+                timestamp: options.timestamp || new Date().toISOString(),
+                action: action,
+                point: point,
+                observations: observations,
+                latitude: appState.currentLocation?.latitude,
+                longitude: appState.currentLocation?.longitude
+            });
 
             return result;
 
@@ -788,48 +1026,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- FUNCIONES DE TRANSICIÓN DE ESTADO ---
 
-    async function handleAction(actions, defaultObservations = '') {
+    // options.skipOvertimeCheck: endWorkday ja ha calculat les hores extra una vegada i ha demanat
+    // el comentari; no s'ha de tornar a calcular (M4) ni obrir un segon modal.
+    async function handleAction(actions, defaultObservations = '', options = {}) {
+        let completed = 0;
         try {
             await getCurrentLocation();
-            
+
             let observations = defaultObservations || '';
             const isEndingWorkday = actions.some(a => a.newState === 'FUERA');
 
             // Si es finalitzar jornada i no s'han passat observacions prèviament, comprovar hores extra (>30 min)
-            if (isEndingWorkday && !defaultObservations) {
+            if (isEndingWorkday && !defaultObservations && !options.skipOvertimeCheck) {
                 const extraInfo = calculateExtraHours();
-                const standardWorkDay = extraInfo.standardWorkDay;
-                const dayType = appState.workDayType || getDayTypeName(new Date());
-                const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
-                const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
-
-                let extraText = '';
-                let hasOvertime = false;
-
-                if (extraInfo.remuneratedExtraHours >= 0.5) {
-                    hasOvertime = true;
-                    const extraBlocks = extraInfo.extraBlocks;
-                    const hours = Math.floor(extraBlocks / 2);
-                    const mins = (extraBlocks % 2) * 30;
-                    extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
-                }
+                const info = buildOvertimeInfo(extraInfo);
 
                 // Si hi ha hores extra detectades (>30 minuts), obrir la pantalla d'hores extra
-                if (hasOvertime) {
-                    logActivity(`💰 ${dayType}: Detectades ${extraText} d'hores extra`);
+                if (info.hasOvertime) {
+                    logActivity(`💰 ${info.dayType}: Detectades ${info.extraText} d'hores extra`);
 
                     const obsResult = await showObservationsModal({
-                        title: `💰 Hores Extra Detectades (${extraText})`,
-                        subtitle: `Has superat la jornada habitual de ${standardFormatted}. Has d'indicar motiu o feina realitzada.`,
+                        title: `💰 Hores Extra Detectades (${info.extraText})`,
+                        subtitle: `Has superat la jornada habitual de ${info.standardFormatted}. Has d'indicar motiu o feina realitzada.`,
                         isOvertime: true,
                         overtimeDetails: {
-                            totalHoursFormatted,
-                            standardFormatted,
-                            dayType,
-                            extraText
+                            totalHoursFormatted: info.totalHoursFormatted,
+                            standardFormatted: info.standardFormatted,
+                            dayType: info.dayType,
+                            extraText: info.extraText
                         },
-                        placeholder: `Ex: ${extraText} Feina allargada per incidència client XYZ...`,
-                        defaultValue: `${extraText} `,
+                        placeholder: `Ex: ${info.extraText} Feina allargada per incidència client XYZ...`,
+                        defaultValue: `${info.extraText} `,
                         required: true,
                         confirmText: 'Confirmar i Finalitzar',
                         cancelText: 'Cancel·lar'
@@ -841,29 +1068,43 @@ document.addEventListener('DOMContentLoaded', async () => {
                     } else {
                         observations = obsResult;
                     }
-                } else if (extraInfo.totalHours > standardWorkDay) {
-                    const extraMinutes = Math.round((extraInfo.totalHours - standardWorkDay) * 60);
+                } else if (extraInfo.totalHours > info.standardWorkDay) {
+                    const extraMinutes = Math.round((extraInfo.totalHours - info.standardWorkDay) * 60);
                     logActivity(`ℹ️ Jornada amb ${extraMinutes} minuts extra (menys de 30min, no es considera hora extra)`);
                 } else {
                     logActivity(`✅ Jornada completada dins del temps estàndard`);
                 }
             }
-            
+
             for (const { action, point, newState, onComplete, observations: actionObs } of actions) {
                 const finalObs = actionObs || observations;
                 await sendToProxy(action, point, finalObs);
                 if (newState) appState.currentState = newState;
-                if (onComplete) onComplete();
+                if (onComplete) await onComplete();
                 saveState();
                 updateUI();
+                completed++;
             }
         } catch (error) {
+            if (error && typeof error === 'object') {
+                try { error.completedActions = completed; } catch (e) {}
+            }
             showTranslatedError(error);
             showLoading(false);
             throw error;
         }
     }
 
+    // M3: les transicions esperen (await) a handleAction. L'error ja s'ha mostrat a handleAction;
+    // aquí només s'evita un "unhandled promise rejection" (abans handleAction es llançava sense await).
+    async function runActions(actions, observations = '', options = {}) {
+        try {
+            await handleAction(actions, observations, options);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
 
     async function startWorkday(withObs = false) {
         let obs = '';
@@ -878,10 +1119,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (obs === null) return; // Usuari ha cancel·lat
         }
 
-        handleAction([
+        await runActions([
             {
                 action: 'entrada', point: 'J', newState: 'JORNADA', observations: obs,
-                onComplete: () => { 
+                onComplete: () => {
                     const now = new Date();
                     appState.workStartTime = now;
                     appState.workStartDay = now.getDay();
@@ -893,7 +1134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         ], obs);
     }
-    
+
     async function startAlmacen(withObs = false) {
         let obs = '';
         if (withObs) {
@@ -907,10 +1148,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (obs === null) return; // Usuari ha cancel·lat
         }
 
-        handleAction([
+        await runActions([
             {
                 action: 'entrada', point: '9', newState: 'ALMACEN', observations: obs,
-                onComplete: () => { 
+                onComplete: () => {
                     const now = new Date();
                     appState.workStartTime = now;
                     appState.workStartDay = now.getDay();
@@ -936,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (obs === null) return;
         }
 
-        handleAction([
+        await runActions([
             { action: 'salida', point: '9', observations: obs },
             { action: 'entrada', point: 'J', newState: 'JORNADA', observations: obs }
         ], obs);
@@ -958,53 +1199,95 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return;
                 }
             }
-            
+
             await getCurrentLocation();
-            
+
             // Primer fitxatge: Sortida de jornada
             await sendToProxy('salida', 'J', '');
-            
+
             // Segon fitxatge: Entrada a pausa amb observacions del tipus
             await sendToProxy('entrada', 'P', pauseType);
-            
+
             // Actualitzar estat
+            const pauseStartedAt = new Date();
             appState.currentState = 'PAUSA';
-            appState.currentPauseStart = new Date();
+            appState.currentPauseStart = pauseStartedAt;
             appState.currentPauseType = pauseType;
             appState.pauseAlarmTriggered = false;
+            // Estat net d'alarma: un valor obsolet d'una sessió anterior no ha de silenciar aquesta pausa
+            appState.isAlarmPlaying = false;
+            appState.lastAlarmTime = null;
+            appState.alarmSource = null;
             if (pauseType === 'esmorçar') {
                 appState.breakfastDate = getLocalDateString(new Date());
             }
-            
-            // 1. Mantenir pantalla activa durant la pausa
-            await requestWakeLock();
-            
-            // 2. Iniciar àudio keep-alive en segon pla (permet que l'alarma soni amb pantalla bloquejada)
-            startBackgroundAudioKeepAlive(pauseType);
-
-            // 3. Programar notificació del sistema
-            const pauseLimit = PAUSE_LIMITS[pauseType];
-            await scheduleNotification(pauseType, pauseLimit);
-            
-            // 4. Mostrar instruccions a l'usuari (15 min o 30 min)
-            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            if (isNativeApp) {
-                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonarà en segon pla o pantalla apagada.`;
-            } else {
-                dom.infoMessage.textContent = `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonora sonarà automàticament.`;
-            }
-            dom.infoMessage.classList.add('success');
-            
+            // Desar JA: si l'app es tanca durant els passos següents, la pausa no es perd
             saveState();
             updateUI();
-            
+
+            // 1. Mantenir pantalla activa durant la pausa
+            await requestWakeLock();
+
+            // 2. Iniciar àudio keep-alive en segon pla (permet que l'alarma soni amb pantalla bloquejada)
+            const pauseLimit = PAUSE_LIMITS[pauseType];
+            const remaining = Math.max(1000, pauseLimit - (Date.now() - pauseStartedAt.getTime()));
+            startBackgroundAudioKeepAlive(pauseType, remaining);
+
+            // 3. Programar notificació del sistema (i comprovar que realment queda programada)
+            if (!isNativeApp) await requestNotificationPermission();
+            const scheduled = await scheduleNotification(pauseType, remaining);
+
+            // 4. Mostrar instruccions a l'usuari (15 min o 30 min)
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            const info = buildPauseInfoMessage(pauseType, timeText, scheduled);
+            dom.infoMessage.textContent = info.text;
+            dom.infoMessage.classList.remove('success', 'alert');
+            dom.infoMessage.classList.add(info.isWarning ? 'alert' : 'success');
+
             logActivity(`🍽️ Pausa iniciada: ${pauseType} (${timeText})`);
-            logActivity(`🔔 Alarma programada per a ${timeText} (activa amb pantalla bloquejada)`);
-            
+            logActivity(scheduled.ok
+                ? `🔔 Alarma programada per a ${timeText} (activa amb pantalla bloquejada)`
+                : `⚠️ Alarma en segon pla NO garantida: ${scheduled.reason || 'motiu desconegut'}`);
+
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
             showTranslatedError(error);
         }
+    }
+
+    function buildPauseInfoMessage(pauseType, timeText, scheduled) {
+        let text = isNativeApp
+            ? `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonarà en segon pla o pantalla apagada.`
+            : `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonora sonarà automàticament.`;
+        let isWarning = false;
+        if (!scheduled || !scheduled.ok) {
+            isWarning = true;
+            text = `⚠️ Pausa ${pauseType} iniciada (${timeText}), però NO s'ha pogut programar l'alarma en segon pla`
+                + ` (${describeScheduleFailure(scheduled && scheduled.reason)}). Mantingues l'app oberta amb la pantalla encesa.`;
+        } else if (scheduled.exactDenied) {
+            isWarning = true;
+            text += ' ⚠️ Android no permet alarmes exactes a aquesta app: l\'avís pot endarrerir-se uns minuts (activa "Alarmes i recordatoris" a la configuració de l\'app).';
+        }
+        if (!isWarning && !isNativeApp && notificationStatus.permission === 'denied') {
+            isWarning = true;
+            text += ' ⚠️ Notificacions denegades: l\'alarma només sonarà amb aquesta pestanya oberta.';
+        }
+        return { text, isWarning };
+    }
+
+    function describeScheduleFailure(reason) {
+        switch (reason) {
+            case 'permission-denied': return 'permís de notificacions denegat: activa\'l a Configuració > Aplicacions > 9T Beta10 > Notificacions';
+            case 'not-pending': return 'Android no ha acceptat la programació';
+            case 'no-service-worker': return 'el service worker no està actiu';
+            default: return reason ? String(reason) : 'motiu desconegut';
+        }
+    }
+
+    function clearInfoMessage() {
+        if (!dom.infoMessage) return;
+        dom.infoMessage.textContent = '';
+        dom.infoMessage.classList.remove('success', 'alert');
     }
 
     async function endPause() {
@@ -1017,6 +1300,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (appState.currentState !== 'PAUSA') {
             return;
         }
+        clearInfoMessage();
 
         // 2. DETENIR EL TEMPS DE PAUSA EXACTE EN AQUEST INSTANT
         const now = new Date();
@@ -1029,20 +1313,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             appState.breakfastDate = getLocalDateString(now);
         }
 
-        // 3. REGISTRAR IMMEDIATAMENT A LA BASE DE DADES SQLITE
-        if (window.beta10DB) {
-            const creds = authManager?.getCredentials();
-            window.beta10DB.recordPausa({
-                user: creds?.username || 'usuari',
-                date: getLocalDateString(pauseStart),
-                type: pauseType,
-                startTime: pauseStart,
-                endTime: now,
-                durationMinutes: pauseMinutes
-            }).then(() => {
-                logActivity(`💾 Pausa de ${pauseType} (${Math.round(pauseMinutes)} min) guardada a SQLite`);
-            }).catch(e => console.warn('⚠️ Error gravant pausa a SQLite:', e));
-        }
+        // 3. REGISTRAR IMMEDIATAMENT A LA BASE DE DADES SQLITE (amb coa si falla)
+        const creds = authManager?.getCredentials();
+        recordDb('pausa', {
+            user: creds?.username || 'usuari',
+            date: getLocalDateString(pauseStart),
+            type: pauseType,
+            startTime: pauseStart,
+            endTime: now,
+            durationMinutes: pauseMinutes
+        }).then((saved) => {
+            if (saved) logActivity(`💾 Pausa de ${pauseType} (${Math.round(pauseMinutes)} min) guardada a SQLite`);
+        });
 
         // 4. ATURAR EL TEMPS A L'ESTAT LOCAL IMMEDIATAMENT
         appState.totalPauseTimeToday += pauseDuration;
@@ -1060,23 +1342,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         logActivity(`⏱️ Temps de pausa aturat: ${Math.round(pauseMinutes)} minuts computats.`);
 
         // 5. ENVIAR FITXATGES AL SERVIDOR REMOT BETA10
+        const returnActions = [
+            { action: 'salida', point: 'P' },
+            { action: 'entrada', point: 'J', newState: 'JORNADA' }
+        ];
         try {
-            await handleAction([
-                { action: 'salida', point: 'P' },
-                { action: 'entrada', point: 'J', newState: 'JORNADA' }
-            ]);
-            clearPendingSync();
+            await handleAction(returnActions);
         } catch (error) {
             logActivity(`⚠️ Error xarxa fitxant tornada de pausa a Beta10: ${error.message}. El temps de pausa local ja s'ha aturat.`);
-            savePendingSync({
-                type: 'END_PAUSE',
-                title: 'Tornada de Pausa',
-                actions: [
-                    { action: 'salida', point: 'P' },
-                    { action: 'entrada', point: 'J', newState: 'JORNADA' }
-                ],
-                timestamp: now.toISOString()
-            });
+            // Només es posen en cua les accions que NO s'han arribat a enviar (evita duplicar la "salida P")
+            const done = Number.isFinite(error && error.completedActions) ? error.completedActions : 0;
+            const iso = now.toISOString();
+            const remaining = returnActions.slice(done).map(a => ({ action: a.action, point: a.point, timestamp: iso }));
+            if (remaining.length > 0) {
+                savePendingSync({
+                    type: 'END_PAUSE',
+                    title: 'Tornada de Pausa',
+                    actions: remaining,
+                    timestamp: iso
+                });
+            }
             showTranslatedError(error);
         }
     }
@@ -1084,27 +1369,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function endWorkday(withObs = false) {
         let customObservations = '';
 
-        const extraInfo = calculateExtraHours();
-        const standardWorkDay = extraInfo.standardWorkDay;
-        const dayType = appState.workDayType || getDayTypeName(new Date());
-        const totalHoursFormatted = `${Math.floor(extraInfo.totalHours)}h ${Math.round((extraInfo.totalHours % 1) * 60)}min`;
-        const standardFormatted = getStandardWorkDayFormatted(standardWorkDay);
-
-        let extraText = '';
-        let hasOvertime = false;
-        if (extraInfo.remuneratedExtraHours >= 0.5) {
-            hasOvertime = true;
-            const extraBlocks = extraInfo.extraBlocks;
-            const hours = Math.floor(extraBlocks / 2);
-            const mins = (extraBlocks % 2) * 30;
-            extraText = mins === 0 ? `+${hours}h` : (hours === 0 ? `+${mins}min` : `+${hours}h ${mins}min`);
-        }
+        // M4: les hores extra es calculen UNA SOLA VEGADA, a l'instant de prémer "Finalitzar".
+        // Aquest mateix resultat decideix si cal el modal, què es mostra i què es desa a SQLite
+        // (abans handleAction i onComplete tornaven a calcular-ho en moments diferents).
+        const endAt = new Date();
+        const extraInfo = calculateExtraHours(endAt);
+        const info = buildOvertimeInfo(extraInfo);
+        const { dayType, totalHoursFormatted, standardFormatted, extraText, hasOvertime } = info;
 
         if (withObs || hasOvertime) {
             const obsResult = await showObservationsModal({
                 title: hasOvertime ? `💰 Hores Extra (${extraText}) Detectades` : '💬 Observacions de Sortida',
-                subtitle: hasOvertime 
-                    ? `Has superat la jornada habitual de ${standardFormatted}. Has d'indicar obligatòriament el motiu o feina.` 
+                subtitle: hasOvertime
+                    ? `Has superat la jornada habitual de ${standardFormatted}. Has d'indicar obligatòriament el motiu o feina.`
                     : `Finalització de jornada (${totalHoursFormatted} totals).`,
                 isOvertime: hasOvertime,
                 overtimeDetails: hasOvertime ? {
@@ -1113,8 +1390,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     dayType,
                     extraText
                 } : null,
-                placeholder: hasOvertime 
-                    ? `Ex: ${extraText} Feina allargada per incidència client XYZ...` 
+                placeholder: hasOvertime
+                    ? `Ex: ${extraText} Feina allargada per incidència client XYZ...`
                     : 'Introdueix observacions de sortida...',
                 defaultValue: hasOvertime ? `${extraText} ` : '',
                 required: hasOvertime, // Obligatori si hi ha hores extra
@@ -1131,13 +1408,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Dades necessàries per al registre a SQLite
         const startWorkDate = appState.workStartTime;
-        const totalPauseMs = appState.totalPauseTimeToday;
+        const pauseInProgressMs = (appState.currentState === 'PAUSA' && appState.currentPauseStart)
+            ? Math.max(0, endAt - new Date(appState.currentPauseStart))
+            : 0;
+        const totalPauseMs = appState.totalPauseTimeToday + pauseInProgressMs;
         const currentStandardHours = appState.workDayStandard ?? 9;
         const currentDayType = appState.workDayType || getDayTypeName(new Date());
         const shiftType = appState.currentState === 'ALMACEN' ? 'ALMACEN' : 'JORNADA';
 
         const actions = [];
-        
+
         // Secuencia correcta según el estado actual
         if (appState.currentState === 'PAUSA') {
             actions.push({ action: 'salida', point: 'P' });
@@ -1148,24 +1428,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else if (appState.currentState === 'JORNADA') {
             actions.push({ action: 'salida', point: 'J' });
         }
-       
+
         // El último action cambia el estado a FUERA
         if (actions.length > 0) {
             actions[actions.length - 1].newState = 'FUERA';
-            actions[actions.length - 1].onComplete = () => {
-                const now = new Date();
-                const totalWorkMs = startWorkDate ? (now - startWorkDate - totalPauseMs) : 0;
+            actions[actions.length - 1].onComplete = async () => {
+                const totalWorkMs = startWorkDate ? (endAt - startWorkDate - totalPauseMs) : 0;
                 const workedHours = Math.max(0, totalWorkMs / (1000 * 60 * 60));
                 const pauseMinutes = totalPauseMs / (1000 * 60);
 
-                // 💾 Registrar jornada a SQLite
-                if (window.beta10DB && startWorkDate) {
+                // 💾 Registrar jornada a SQLite. A3: s'espera el resultat; si falla, l'usuari
+                // és avisat i la jornada queda en una coa persistent (localStorage) que es
+                // reintenta quan la BD torna a estar disponible.
+                if (startWorkDate) {
                     const creds = authManager.getCredentials();
-                    window.beta10DB.recordJornada({
+                    await recordDb('jornada', {
                         user: creds?.username || 'usuari',
                         date: getLocalDateString(startWorkDate),
                         startTime: startWorkDate,
-                        endTime: now,
+                        endTime: endAt,
                         type: shiftType,
                         dayType: currentDayType,
                         standardHours: currentStandardHours,
@@ -1174,7 +1455,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         remuneratedExtraHours: extraInfo.remuneratedExtraHours || 0,
                         pauseMinutes: pauseMinutes,
                         observations: customObservations || ''
-                    }).catch(e => console.warn('⚠️ Error gravant jornada a SQLite:', e));
+                    }, { notifyUser: true });
                 }
 
                 appState.workStartTime = null;
@@ -1192,31 +1473,57 @@ document.addEventListener('DOMContentLoaded', async () => {
             };
         }
 
-        handleAction(actions, customObservations);
+        await runActions(actions, customObservations, { skipOvertimeCheck: true });
     }
 
     // --- SISTEMA DE NOTIFICACIONES, ALARMA Y WAKE LOCK ---
-    const NATIVE_ALARM_CHANNEL_ID = 'pause_alarm_channel_v3';
+    //
+    // Arquitectura de l'alarma de pausa (vegeu també CLAUDE.md > "Alarmes de pausa"):
+    //  - APK (Capacitor): LocalNotifications programa una alarma d'Android (AlarmManager,
+    //    setExactAndAllowWhileIdle) que mostra la notificació amb so pel canal d'alta
+    //    importància encara que l'app estigui en segon pla o la pantalla bloquejada. Si l'app
+    //    està viva, l'esdeveniment `localNotificationReceived` fa sonar l'alarma en bucle.
+    //  - Web/PWA: un setTimeout a la pàgina + un altre al service worker. Les PWA no poden
+    //    garantir res amb el navegador tancat o el SW aturat pel sistema (limitació de la plataforma).
+    const NATIVE_ALARM_CHANNEL_ID = 'pause_alarm_channel_v4';
+    // Els canals d'Android són immutables un cop creats: si una versió anterior de l'APK els
+    // va crear sense el so (alarm.wav encara no era a res/raw) o l'usuari els va silenciar, la
+    // única manera de recuperar-los és crear-ne un d'id nou i esborrar els vells.
+    const LEGACY_ALARM_CHANNEL_IDS = ['pause_alarm_channel', 'pause_alarm_channel_v2', 'pause_alarm_channel_v3'];
+    const NATIVE_ALARM_NOTIFICATION_ID = 1001;
+    const NATIVE_SMALL_ICON = 'ic_stat_pause_alarm'; // drawable monocrom creat per scripts/prepare-android.js (L12)
+    const EXACT_ALARM_PROMPTED_KEY = 'beta10_exact_alarm_prompted';
+    const notificationStatus = { permission: 'unknown', exactAlarm: 'unknown', channelSilenced: false };
     let backgroundAlarmTimer = null;
+    let nativeListenersRegistered = false;
 
     function getAudioPlayer() {
         return document.getElementById('pause-audio-player');
     }
 
+    function getLocalNotificationsPlugin() {
+        return isNativeApp ? (window.Capacitor?.Plugins?.LocalNotifications || null) : null;
+    }
+
     // Iniciar reproducció silenciosa (Keep-Alive) durant la pausa
-    // Això manté actiu el procés web d'Android/iOS evitant que el navegador suspengui l'àudio quan s'apaga la pantalla
-    function startBackgroundAudioKeepAlive(pauseType) {
+    // Això manté actiu el procés web d'Android/iOS evitant que el navegador suspengui l'àudio quan s'apaga la pantalla.
+    // `remainingMs`: temps que falta fins a l'alarma (abans sempre s'armava el límit complet, també en
+    // reobrir l'app a mitja pausa, i la segona alarma sonava tard o duplicada).
+    function startBackgroundAudioKeepAlive(pauseType, remainingMs = null) {
         try {
             const player = getAudioPlayer();
             if (player) {
                 player.src = 'silence.wav';
                 player.loop = true;
                 player.volume = 0.01;
-                player.play().then(() => {
-                    logActivity('🔈 Keep-Alive d\'àudio iniciat per a la pausa');
-                }).catch(e => {
-                    console.warn('⚠️ No s\'ha pogut iniciar àudio keep-alive:', e);
-                });
+                const playing = player.play();
+                if (playing && typeof playing.then === 'function') {
+                    playing.then(() => {
+                        logActivity('🔈 Keep-Alive d\'àudio iniciat per a la pausa');
+                    }).catch(e => {
+                        console.warn('⚠️ No s\'ha pogut iniciar àudio keep-alive:', e);
+                    });
+                }
             }
         } catch (e) {
             console.warn('⚠️ Error en startBackgroundAudioKeepAlive:', e);
@@ -1227,13 +1534,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             backgroundAlarmTimer = null;
         }
         const pauseLimit = PAUSE_LIMITS[pauseType];
-        if (pauseLimit) {
+        const delay = remainingMs === null || remainingMs === undefined ? pauseLimit : remainingMs;
+        if (pauseLimit && Number.isFinite(delay)) {
             backgroundAlarmTimer = setTimeout(() => {
+                backgroundAlarmTimer = null;
                 if (appState.currentState === 'PAUSA') {
                     logActivity(`⏰ Temporitzador de pausa finalitzat (${pauseType})`);
                     playPauseAlarm(pauseType, 'background-timer');
                 }
-            }, pauseLimit);
+            }, Math.max(0, delay));
         }
     }
 
@@ -1241,11 +1550,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     function playAlarmAudio(pauseType) {
         try {
             const player = getAudioPlayer();
-            if (player) {
-                player.src = 'alarm.wav';
-                player.loop = true;
-                player.volume = 1.0;
-                player.play().then(() => {
+            if (!player) {
+                createBeepSound('strong');
+                return;
+            }
+            player.src = 'alarm.wav';
+            player.loop = true;
+            player.volume = 1.0;
+            const playing = player.play();
+            if (playing && typeof playing.then === 'function') {
+                playing.then(() => {
                     logActivity('🔊 So d\'alarma fort activat');
                 }).catch(e => {
                     console.warn('⚠️ Error reproduint alarm.wav:', e);
@@ -1254,6 +1568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (e) {
             console.warn('⚠️ Error en playAlarmAudio:', e);
+            createBeepSound('strong');
         }
     }
 
@@ -1277,115 +1592,143 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Canal de notificacions per a Android amb màxima prioritat i so propi d'alarma
     async function initNativeNotificationChannel() {
-        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
-            try {
-                const { LocalNotifications } = window.Capacitor.Plugins;
-                try {
-                    await LocalNotifications.deleteChannel({ id: 'pause_alarm_channel' });
-                    await LocalNotifications.deleteChannel({ id: 'pause_alarm_channel_v2' });
-                } catch (e) {}
-
-                await LocalNotifications.createChannel({
-                    id: NATIVE_ALARM_CHANNEL_ID,
-                    name: 'Alarmes de Pausa',
-                    description: 'Notificacions i alarma sonora de finalització de pausa laboral',
-                    importance: 5, // MAX: sona, vibra i apareix a pantalla bloquejada / heads-up
-                    visibility: 1, // Visible a la pantalla de bloqueig
-                    sound: 'alarm.wav',
-                    vibration: true,
-                    lights: true,
-                    lightColor: '#E74C3C'
-                });
-
-                // Registrar botó d'acció a la notificació d'Android per aturar el timbre directament
-                try {
-                    await LocalNotifications.registerActionTypes({
-                        types: [
-                            {
-                                id: 'PAUSE_ALARM_ACTIONS',
-                                actions: [
-                                    {
-                                        id: 'STOP_ALARM',
-                                        title: '🔕 Aturar Alarma',
-                                        destructive: true
-                                    }
-                                ]
-                            }
-                        ]
-                    });
-                } catch (actErr) {
-                    console.warn('⚠️ No s\'han pogut registrar tipus d\'acció:', actErr);
-                }
-
-                console.log('✅ Canal de notificacions nativa d\'alta prioritat amb so d\'alarma preparat');
-            } catch (err) {
-                console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (!LocalNotifications) return;
+        try {
+            // Esborrar els canals antics un a un (si un falla, els altres s'esborren igualment)
+            for (const legacyId of LEGACY_ALARM_CHANNEL_IDS) {
+                try { await LocalNotifications.deleteChannel({ id: legacyId }); } catch (e) {}
             }
+
+            await LocalNotifications.createChannel({
+                id: NATIVE_ALARM_CHANNEL_ID,
+                name: 'Alarmes de Pausa',
+                description: 'Notificacions i alarma sonora de finalització de pausa laboral',
+                importance: 5, // MAX: sona, vibra i apareix a pantalla bloquejada / heads-up
+                visibility: 1, // Visible a la pantalla de bloqueig
+                sound: 'alarm.wav',
+                vibration: true,
+                lights: true,
+                lightColor: '#E74C3C'
+            });
+
+            // Registrar botó d'acció a la notificació d'Android per aturar el timbre directament
+            try {
+                await LocalNotifications.registerActionTypes({
+                    types: [
+                        {
+                            id: 'PAUSE_ALARM_ACTIONS',
+                            actions: [
+                                {
+                                    id: 'STOP_ALARM',
+                                    title: '🔕 Aturar Alarma',
+                                    destructive: true
+                                }
+                            ]
+                        }
+                    ]
+                });
+            } catch (actErr) {
+                console.warn('⚠️ No s\'han pogut registrar tipus d\'acció:', actErr);
+            }
+
+            // Comprovar que l'usuari no ha silenciat el canal des de la configuració d'Android
+            try {
+                if (typeof LocalNotifications.listChannels === 'function') {
+                    const listed = await LocalNotifications.listChannels();
+                    const channel = (listed?.channels || []).find(c => c.id === NATIVE_ALARM_CHANNEL_ID);
+                    notificationStatus.channelSilenced = !!(channel && Number(channel.importance) < 3);
+                    if (notificationStatus.channelSilenced) {
+                        logActivity('⚠️ El canal "Alarmes de Pausa" està silenciat a la configuració d\'Android: l\'alarma no sonarà.');
+                    }
+                }
+            } catch (listErr) {
+                console.warn('⚠️ No s\'ha pogut comprovar el canal:', listErr);
+            }
+
+            console.log('✅ Canal de notificacions nativa d\'alta prioritat amb so d\'alarma preparat');
+        } catch (err) {
+            console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
         }
     }
 
     // Configurar listeners d'esdeveniments per a notificacions natives
     function setupNativeNotificationListeners() {
-        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
-            try {
-                const { LocalNotifications } = window.Capacitor.Plugins;
-                
-                // Quan la notificació es dispara mentre l'app està en primer pla o segon pla
-                LocalNotifications.addListener('localNotificationReceived', (notification) => {
-                    logActivity(`🔔 Notificació d'alarma rebuda: ${notification.title}`);
-                    if (appState.currentState === 'PAUSA') {
-                        playPauseAlarm(appState.currentPauseType || 'pausa', 'native-notification');
-                    }
-                });
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (!LocalNotifications || nativeListenersRegistered) return;
+        nativeListenersRegistered = true;
+        try {
+            // Quan la notificació es dispara mentre l'app està viva (primer o segon pla)
+            Promise.resolve(LocalNotifications.addListener('localNotificationReceived', (notification) => {
+                logActivity(`🔔 Notificació d'alarma rebuda: ${notification?.title || ''}`);
+                if (appState.currentState === 'PAUSA') {
+                    playPauseAlarm(appState.currentPauseType || 'pausa', 'native-notification');
+                }
+            })).catch(e => console.warn('⚠️ addListener(localNotificationReceived):', e));
 
-                // Quan l'usuari toca la notificació o un dels seus botons des de la barra d'Android
-                LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
-                    const actionId = notificationAction?.actionId;
-                    logActivity(`👆 Notificació d'alarma acció: ${actionId || 'oberta'}`);
-                    if (actionId === 'STOP_ALARM') {
-                        stopAlarm();
-                        logActivity('🔕 Alarma detinguda directament des de la notificació');
-                    } else if (appState.currentState === 'PAUSA') {
-                        // Només aturar si ja està sonant
-                        stopAlarm();
-                    }
-                });
-                
-                console.log('✅ Listeners de notificacions natives configurats');
-            } catch (err) {
-                console.warn('⚠️ Error configurant listeners de notificació nativa:', err);
-            }
+            // Quan l'usuari toca la notificació o un dels seus botons des de la barra d'Android
+            Promise.resolve(LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
+                const actionId = notificationAction?.actionId;
+                logActivity(`👆 Notificació d'alarma acció: ${actionId || 'oberta'}`);
+                if (actionId === 'STOP_ALARM') {
+                    stopAlarm();
+                    logActivity('🔕 Alarma detinguda directament des de la notificació');
+                } else if (appState.isAlarmPlaying) {
+                    // Només aturar si ja està sonant
+                    stopAlarm();
+                }
+            })).catch(e => console.warn('⚠️ addListener(localNotificationActionPerformed):', e));
+
+            console.log('✅ Listeners de notificacions natives configurats');
+        } catch (err) {
+            console.warn('⚠️ Error configurant listeners de notificació nativa:', err);
         }
     }
 
-    // Solicitar permisos de notificación (Android nativo o Web)
+    // Solicitar permisos de notificación (Android nativo o Web). Retorna true si estan concedits.
     async function requestNotificationPermission() {
-        if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (LocalNotifications) {
             try {
-                const { LocalNotifications } = window.Capacitor.Plugins;
-                const status = await LocalNotifications.requestPermissions();
-                if (status.display === 'granted') {
+                // Primer es consulta: si ja estan concedits no cal demanar res
+                let status = typeof LocalNotifications.checkPermissions === 'function'
+                    ? await LocalNotifications.checkPermissions()
+                    : null;
+                if (!status || status.display !== 'granted') {
+                    status = await LocalNotifications.requestPermissions();
+                }
+                if (status && status.display === 'granted') {
+                    notificationStatus.permission = 'granted';
                     logActivity('✅ Permisos de notificació nativa concedits');
                     await initNativeNotificationChannel();
                     return true;
-                } else {
-                    logActivity('⚠️ Permisos de notificació nativa no concedits');
-                    return false;
                 }
+                notificationStatus.permission = 'denied';
+                logActivity('⚠️ Permisos de notificació nativa no concedits');
+                return false;
             } catch (error) {
                 logActivity(`❌ Error permisos notificació nativa: ${error.message}`);
                 return false;
             }
-        } else if (!isNativeApp && 'Notification' in window && 'serviceWorker' in navigator) {
+        } else if (!isNativeApp && typeof Notification !== 'undefined' && 'serviceWorker' in navigator) {
             try {
-                const permission = await Notification.requestPermission();
-                if (permission === 'granted') {
-                    logActivity('✅ Permisos de notificació concedits');
+                if (Notification.permission === 'granted') {
+                    notificationStatus.permission = 'granted';
                     return true;
-                } else {
-                    logActivity('⚠️ Permisos de notificació denegats');
+                }
+                if (Notification.permission === 'denied') {
+                    notificationStatus.permission = 'denied';
                     return false;
                 }
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    notificationStatus.permission = 'granted';
+                    logActivity('✅ Permisos de notificació concedits');
+                    return true;
+                }
+                notificationStatus.permission = 'denied';
+                logActivity('⚠️ Permisos de notificació denegats');
+                return false;
             } catch (error) {
                 logActivity(`❌ Error permisos notificació: ${error.message}`);
                 return false;
@@ -1393,7 +1736,58 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         return false;
     }
-    
+
+    // Android 12+: sense "Alarmes i recordatoris" l'alarma NO és exacta (setAndAllowWhileIdle) i
+    // en Doze pot endarrerir-se molts minuts. Es comprova i, un cop, es porta l'usuari a la configuració.
+    async function checkExactAlarmSetting(askUser = false) {
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (!LocalNotifications || typeof LocalNotifications.checkExactNotificationSetting !== 'function') return 'unknown';
+        try {
+            const result = await LocalNotifications.checkExactNotificationSetting();
+            const value = (result && (result.exact_alarm || result.exactAlarm)) || 'unknown';
+            notificationStatus.exactAlarm = value;
+            if (value === 'denied') {
+                logActivity('⚠️ Alarmes exactes no permeses: l\'alarma de pausa pot endarrerir-se.');
+                let alreadyAsked = false;
+                try { alreadyAsked = !!localStorage.getItem(EXACT_ALARM_PROMPTED_KEY); } catch (e) {}
+                if (askUser && !alreadyAsked && typeof LocalNotifications.changeExactNotificationSetting === 'function') {
+                    try { localStorage.setItem(EXACT_ALARM_PROMPTED_KEY, '1'); } catch (e) {}
+                    if (confirm('Perquè l\'alarma de pausa soni a l\'hora exacta, Android ha de permetre "Alarmes i recordatoris" a aquesta app.\n\nVols obrir la configuració ara?')) {
+                        const after = await LocalNotifications.changeExactNotificationSetting();
+                        const afterValue = (after && (after.exact_alarm || after.exactAlarm)) || 'unknown';
+                        notificationStatus.exactAlarm = afterValue;
+                        return afterValue;
+                    }
+                }
+            }
+            return value;
+        } catch (error) {
+            console.warn('⚠️ No s\'ha pogut comprovar l\'alarma exacta:', error);
+            return 'unknown';
+        }
+    }
+
+    function showNotificationWarning(text) {
+        if (!dom.infoMessage) return;
+        dom.infoMessage.textContent = text;
+        dom.infoMessage.classList.remove('success');
+        dom.infoMessage.classList.add('alert');
+    }
+
+    // M10: s'executa DESPRÉS de pintar la UI; mai bloqueja updateUI esperant el diàleg de permisos.
+    async function initNotifications() {
+        const granted = await requestNotificationPermission();
+        if (granted) {
+            if (isNativeApp) await checkExactAlarmSetting(true);
+            if (notificationStatus.channelSilenced) {
+                showNotificationWarning('🔕 El canal "Alarmes de Pausa" està silenciat a la configuració d\'Android: l\'alarma no sonarà. Activa\'l a Configuració > Aplicacions > 9T Beta10 > Notificacions.');
+            }
+        } else if (isNativeApp ? !!getLocalNotificationsPlugin() : (typeof Notification !== 'undefined')) {
+            showNotificationWarning('🔕 Notificacions desactivades: l\'alarma de pausa NOMÉS sonarà amb l\'app oberta. Activa-les a la configuració del dispositiu.');
+        }
+        return granted;
+    }
+
     // Wake Lock para mantener pantalla activa durante pausa si la pantalla está encendida
     async function requestWakeLock() {
         try {
@@ -1429,7 +1823,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         return false;
     }
-    
+
     // Liberar wake lock
     async function releaseWakeLock() {
         if (appState.wakeLock) {
@@ -1442,26 +1836,63 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     }
-    
-    // Programar notificación con AlarmManager nativo (segundo plano real) o Service Worker
+
+    // `navigator.serviceWorker.ready` no es resol MAI si el SW no s'ha registrat (http, mode privat...);
+    // sense límit de temps, startPause quedava penjat. Amb límit, es continua amb el que hi hagi.
+    async function getServiceWorkerRegistration(timeoutMs = 3000) {
+        if (isNativeApp || !('serviceWorker' in navigator)) return null;
+        try {
+            const timeout = new Promise(resolve => setTimeout(() => resolve(null), timeoutMs));
+            const registration = await Promise.race([navigator.serviceWorker.ready, timeout]);
+            return registration || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async function isNativeAlarmPending() {
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (!LocalNotifications || typeof LocalNotifications.getPending !== 'function') return null;
+        try {
+            const pending = await LocalNotifications.getPending();
+            return (pending?.notifications || []).some(n => Number(n.id) === NATIVE_ALARM_NOTIFICATION_ID);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Programar notificación con AlarmManager nativo (segundo plano real) o Service Worker.
+    // Retorna { ok, reason?, exactDenied? }: ja no se silencia cap fallada (abans només anava al log).
     async function scheduleNotification(pauseType, delayMs) {
         const timeLimit = pauseType === 'esmorçar' ? 15 : 30;
         const targetDate = new Date(Date.now() + delayMs);
-        
+        const outcome = { ok: false, reason: null, exactDenied: false };
+
         try {
-            if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
-                const { LocalNotifications } = window.Capacitor.Plugins;
-                
-                // Cancelar alarma nativa previa
+            const LocalNotifications = getLocalNotificationsPlugin();
+            if (LocalNotifications) {
+                // El permís pot haver-se revocat des de l'última vegada
+                const granted = notificationStatus.permission === 'granted'
+                    ? (typeof LocalNotifications.checkPermissions === 'function'
+                        ? ((await LocalNotifications.checkPermissions())?.display === 'granted')
+                        : true)
+                    : await requestNotificationPermission();
+                if (!granted) {
+                    notificationStatus.permission = 'denied';
+                    outcome.reason = 'permission-denied';
+                    return outcome;
+                }
+
+                // Cancelar alarma nativa previa (mateix id: mai hi ha duplicats)
                 try {
-                    await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+                    await LocalNotifications.cancel({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
                 } catch (e) {}
 
                 // Programar con allowWhileIdle: true (activa alarma de Android aunque el móvil esté en reposo/bloqueado)
                 await LocalNotifications.schedule({
                     notifications: [
                         {
-                            id: 1001,
+                            id: NATIVE_ALARM_NOTIFICATION_ID,
                             title: '⏰ Temps de pausa completat!',
                             body: `Has completat els ${timeLimit} minuts de ${pauseType}. Torna a la jornada laboral!`,
                             schedule: {
@@ -1469,7 +1900,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 allowWhileIdle: true
                             },
                             channelId: NATIVE_ALARM_CHANNEL_ID,
-                            smallIcon: 'ic_launcher_round',
+                            smallIcon: NATIVE_SMALL_ICON,
                             iconColor: '#E74C3C',
                             sound: 'alarm.wav',
                             actionTypeId: 'PAUSE_ALARM_ACTIONS',
@@ -1479,60 +1910,114 @@ document.addEventListener('DOMContentLoaded', async () => {
                         }
                     ]
                 });
-                
+
+                // El plugin descarta en silenci les programacions amb hora passada; es verifica
+                const pending = await isNativeAlarmPending();
+                if (pending === false) {
+                    outcome.reason = 'not-pending';
+                    logActivity('❌ Android no ha deixat l\'alarma de pausa programada');
+                    return outcome;
+                }
+
+                const exact = await checkExactAlarmSetting(false);
+                outcome.exactDenied = exact === 'denied';
+                outcome.ok = true;
+
                 const timeString = targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 logActivity(`🔔 Alarma nativa programada a les ${timeString} (${timeLimit} min) - Funcionarà en segon pla`);
             } else if (!isNativeApp && 'serviceWorker' in navigator) {
-                const registration = await navigator.serviceWorker.ready;
-                
+                const registration = await getServiceWorkerRegistration();
+                const worker = registration && (registration.active || navigator.serviceWorker.controller);
+                if (!worker) {
+                    outcome.reason = 'no-service-worker';
+                    return outcome;
+                }
+
                 // Enviar mensaje al service worker para programar notificación
-                registration.active.postMessage({
+                worker.postMessage({
                     type: 'SCHEDULE_NOTIFICATION',
                     pauseType: pauseType,
                     delayMs: delayMs,
                     timeLimit: timeLimit
                 });
-                
+                outcome.ok = true;
+
                 logActivity(`🔔 Notificació programada: ${pauseType} en ${Math.round(delayMs/1000/60)} min`);
+            } else {
+                outcome.reason = 'sense suport de notificacions';
             }
         } catch (error) {
+            outcome.reason = error.message || String(error);
             logActivity(`❌ Error programando notificació: ${error.message}`);
         }
+        return outcome;
     }
-    
+
+    // Reobrir l'app / tornar al primer pla amb una pausa en curs: si l'alarma nativa ja no és
+    // programada (reinici, dades esborrades...) es torna a programar. Mai crea duplicats (mateix id).
+    async function ensurePauseAlarmScheduled() {
+        if (appState.currentState !== 'PAUSA' || !appState.currentPauseStart || !appState.currentPauseType) return null;
+        const limit = PAUSE_LIMITS[appState.currentPauseType];
+        if (!limit) return null;
+        const remaining = limit - (Date.now() - new Date(appState.currentPauseStart).getTime());
+        if (!(remaining > 0)) return null;
+        if (isNativeApp) {
+            const pending = await isNativeAlarmPending();
+            if (pending === true) return { ok: true, reason: null, exactDenied: false };
+        }
+        return scheduleNotification(appState.currentPauseType, remaining);
+    }
+
+    // Pausa que ja ha superat el límit sense que hagi sonat res (p. ex. notificacions denegades):
+    // avís visible, SENSE so retroactiu.
+    function showPauseOverrunNotice() {
+        if (appState.currentState !== 'PAUSA' || !appState.currentPauseStart || appState.isAlarmPlaying) return;
+        const limit = PAUSE_LIMITS[appState.currentPauseType];
+        if (!limit) return;
+        const elapsed = Date.now() - new Date(appState.currentPauseStart).getTime();
+        if (elapsed >= limit) {
+            const over = Math.max(0, Math.round((elapsed - limit) / 60000));
+            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            showNotificationWarning(`⚠️ La pausa de ${appState.currentPauseType} ja ha superat els ${timeText} (fa ${over} min). Torna a la jornada.`);
+        }
+    }
+
     // Cancelar notificación programada i netejar notificacions actives de la barra
     async function cancelScheduledNotification() {
         try {
-            if (isNativeApp && window.Capacitor?.Plugins?.LocalNotifications) {
-                const { LocalNotifications } = window.Capacitor.Plugins;
-                await LocalNotifications.cancel({ notifications: [{ id: 1001 }] });
+            const LocalNotifications = getLocalNotificationsPlugin();
+            if (LocalNotifications) {
+                await LocalNotifications.cancel({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
                 try {
                     if (LocalNotifications.removeDeliveredNotifications) {
-                        await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id: 1001 }] });
+                        await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
                     }
                 } catch (e) {}
                 logActivity('🔕 Alarma nativa en segon pla cancel·lada');
             } else if (!isNativeApp && 'serviceWorker' in navigator) {
-                const registration = await navigator.serviceWorker.ready;
-                registration.active.postMessage({
-                    type: 'CANCEL_NOTIFICATION'
-                });
-                logActivity('🔕 Notificació cancelada');
+                const registration = await getServiceWorkerRegistration(1500);
+                const worker = registration && (registration.active || navigator.serviceWorker.controller);
+                if (worker) {
+                    worker.postMessage({
+                        type: 'CANCEL_NOTIFICATION'
+                    });
+                    logActivity('🔕 Notificació cancelada');
+                }
             }
         } catch (error) {
             logActivity(`❌ Error cancelando notificació: ${error.message}`);
         }
     }
-    
+
     function createBeepSound(intensity = 'normal') {
         try {
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
-            
+
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
-            
+
             // Sonido fuerte para alertas de pausa
             oscillator.frequency.value = 1000;
             oscillator.type = 'sine';
@@ -1540,15 +2025,49 @@ document.addEventListener('DOMContentLoaded', async () => {
             gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
             oscillator.start(audioContext.currentTime);
             oscillator.stop(audioContext.currentTime + 1.5);
-            
+
         } catch (e) {
             console.log('No se pudo reproducir el sonido');
+        }
+    }
+
+    // Notificació web. `new Notification()` llança "Illegal constructor" a Chrome per a Android
+    // (exigeix registration.showNotification) i, com que estava dins de playPauseAlarm abans
+    // del banner, l'excepció impedia mostrar el banner d'alarma.
+    async function showWebAlarmNotification(pauseType) {
+        try {
+            if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+            const title = '⏰ Temps de pausa completat!';
+            const options = {
+                body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
+                icon: '/icon-192.svg',
+                badge: '/icon-192.svg',
+                tag: 'pause-alarm',
+                requireInteraction: true,
+                silent: false
+            };
+            const registration = await getServiceWorkerRegistration(1000);
+            if (registration && typeof registration.showNotification === 'function') {
+                await registration.showNotification(title, options);
+            } else {
+                new Notification(title, options);
+            }
+        } catch (e) {
+            console.warn('⚠️ No s\'ha pogut mostrar la notificació web:', e);
         }
     }
 
     function playPauseAlarm(pauseType, source = 'local') {
         const now = new Date();
         const timeSinceLastAlarm = appState.lastAlarmTime ? now - appState.lastAlarmTime : Infinity;
+
+        // L'alarma només té sentit durant una pausa (el SW o un temporitzador tardà podrien
+        // disparar-la quan la pausa ja ha acabat)
+        if (appState.currentState !== 'PAUSA') {
+            logActivity(`ℹ️ Alarma (${source}) ignorada: ja no hi ha cap pausa en curs`);
+            return;
+        }
 
         // Prevenir doble disparo si ya está sonando
         if (appState.isAlarmPlaying) {
@@ -1562,28 +2081,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             appState.isAlarmPlaying = true;
             appState.lastAlarmTime = now;
             appState.alarmSource = source;
+            saveState();
 
             logActivity(`🔔 Alarma activada desde: ${source}`);
 
             // 1. Vibración
-            if ('vibrate' in navigator) {
-                navigator.vibrate([1000, 300, 1000, 300, 1000]);
-            }
+            try {
+                if ('vibrate' in navigator) {
+                    navigator.vibrate([1000, 300, 1000, 300, 1000]);
+                }
+            } catch (e) {}
 
             // 2. Reproduir so d'alarma
             playAlarmAudio(pauseType);
 
-            // 3. Notificación web si no es nativa
-            if (!isNativeApp && Notification.permission === 'granted') {
-                const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-                new Notification('⏰ Temps de pausa completat!', {
-                    body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
-                    icon: '/icon-192.svg',
-                    badge: '/icon-192.svg',
-                    tag: 'pause-alarm',
-                    requireInteraction: true,
-                    silent: false
-                });
+            // 3. Notificación web si no es nativa (mai ha de tallar el banner)
+            if (!isNativeApp) {
+                showWebAlarmNotification(pauseType);
             }
 
             // 4. Mostrar banner d'alarma prominent amb botó per aturar el so
@@ -1606,7 +2120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            logActivity(`🚨 ALARMA ${pauseType.toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
+            logActivity(`🚨 ALARMA ${String(pauseType).toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
         }
     }
 
@@ -1658,7 +2172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (appState.workStartTime) {
             const now = new Date();
-            let workDuration = now - appState.workStartTime - appState.totalPauseTimeToday;
+            let workDuration = now - appState.workStartTime - (appState.totalPauseTimeToday || 0);
             
             if (appState.currentState === 'PAUSA' && appState.currentPauseStart) {
                 const currentPauseDuration = now - appState.currentPauseStart;
@@ -1697,6 +2211,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         dom.buttonContainer.innerHTML = ''; // Limpiar botones
+        // Sense això l'interval d'1s tornava a regenerar els botons just després d'updateUI()
+        lastKnownState = appState.currentState;
 
         const showQuickTapToast = () => {
             let toast = document.getElementById('hold-quick-tap-toast');
@@ -1871,11 +2387,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                     createButton(`▶️ Tornar de Pausa${pauseTypeText}`, 'btn-start', endPause, false)
                 );
 
-                if (!appState.isAlarmPlaying) {
-                   dom.infoMessage.classList.remove('alert');
-                   dom.infoMessage.textContent = "";
-                }
-
                 dom.buttonContainer.appendChild(
                     createButton('⛔ Finalitzar Jornada', 'btn-stop', () => {
                         alert('Has de tornar de la pausa abans de finalitzar la jornada.');
@@ -1892,12 +2403,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!appState.currentState ||
             !['FUERA', 'JORNADA', 'PAUSA', 'ALMACEN'].includes(appState.currentState)) {
             logActivity(`⚠️ Estado inválido detectado: "${appState.currentState}" - Resetejant a FUERA`);
-            appState.currentState = 'FUERA';
-            appState.workStartTime = null;
-            appState.currentPauseStart = null;
-            appState.currentPauseType = null;
-            appState.isAlarmPlaying = false;
-            appState.pauseAlarmTriggered = false;
+            resetToOutOfWorkday();
             saveState();
         }
 
@@ -1978,12 +2484,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                     logActivity('🔧 Auto-correcció: Tornat a jornada normal');
                     return true;
                 }
-                
+
                 // Si la pausa porta més d'1 hora (probable oblit o error d'aplicació)
                 const pauseStart = new Date(appState.currentPauseStart);
-                const pauseDuration = new Date() - pauseStart;
+                const closedAt = new Date();
+                const pauseDuration = closedAt - pauseStart;
                 if (pauseDuration > 60 * 60 * 1000) { // 1 hora
                     logActivity('⚠️ Pausa excessivament llarga detectada (>1h)');
+                    const closedType = appState.currentPauseType || 'pausa';
+
+                    // M6: la pausa REAL no es perd: es desa a la taula pausas amb la seva durada real.
+                    // (El que se suma a la jornada continua limitat al màxim previst més avall, perquè
+                    // una pausa oblidada de 3 hores no falsegi les hores treballades.)
+                    const creds = authManager?.getCredentials();
+                    recordDb('pausa', {
+                        user: creds?.username || 'usuari',
+                        date: getLocalDateString(pauseStart),
+                        type: closedType,
+                        startTime: pauseStart,
+                        endTime: closedAt,
+                        durationMinutes: pauseDuration / (1000 * 60)
+                    });
+
                     // Limitar la pausa al màxim previst (15 min esmorzar o 30 min dinar) en lloc d'afegir hores senceres
                     const maxAllowedMs = PAUSE_LIMITS[appState.currentPauseType] || (15 * 60 * 1000);
                     appState.totalPauseTimeToday += maxAllowedMs;
@@ -1992,25 +2514,29 @@ document.addEventListener('DOMContentLoaded', async () => {
                     appState.currentPauseType = null;
                     appState.isAlarmPlaying = false;
                     appState.pauseAlarmTriggered = false;
+
+                    // La pausa ja no existeix: res d'alarma programada, so ni pantalla encesa
+                    stopAlarmAudio();
+                    cancelScheduledNotification();
+                    releaseWakeLock();
+
                     saveState();
                     updateUI();
-                    logActivity(`🔧 Auto-correcció: Pausa tancada automàticament (computada a ${Math.round(maxAllowedMs / 60000)} min per evitar desfasaments)`);
+                    logActivity(`🔧 Auto-correcció: Pausa tancada automàticament (computada a ${Math.round(maxAllowedMs / 60000)} min a la jornada; pausa real de ${Math.round(pauseDuration / 60000)} min desada a SQLite)`);
                     return true;
                 }
             }
-            
+
             // Detectar jornada sense temps d'inici
             if ((appState.currentState === 'JORNADA' || appState.currentState === 'PAUSA') && !appState.workStartTime) {
                 logActivity('⚠️ Estat inconsistent: Jornada sense temps d\'inici');
-                appState.currentState = 'FUERA';
-                appState.currentPauseStart = null;
-                appState.currentPauseType = null;
+                resetToOutOfWorkday();
                 saveState();
                 updateUI();
                 logActivity('🔧 Auto-correcció: Reset a estat inicial');
                 return true;
             }
-            
+
             return false; // No hi ha hagut correccions
         } catch (error) {
             console.error('Error en validació d\'estat:', error);
@@ -2018,11 +2544,61 @@ document.addEventListener('DOMContentLoaded', async () => {
             return false;
         }
     }
-    
+
+    // M7: un reset a FUERA ha de netejar TOT el que pertany a la jornada perduda; si queda la
+    // pausa acumulada o l'horari del dia, contaminen la jornada següent.
+    function resetToOutOfWorkday() {
+        appState.currentState = 'FUERA';
+        appState.workStartTime = null;
+        appState.currentPauseStart = null;
+        appState.currentPauseType = null;
+        appState.totalPauseTimeToday = 0;
+        appState.isAlarmPlaying = false;
+        appState.pauseAlarmTriggered = false;
+        appState.lastAlarmTime = null;
+        appState.alarmSource = null;
+        appState.workDayStandard = null;
+        appState.workDayType = null;
+        appState.workStartDay = null;
+    }
+
+    // Si hi ha una pausa en curs en obrir l'app: tornar a demanar wake lock, reprogramar l'alarma amb el
+    // temps que falta (no el límit complet) i, si ja ha passat el límit, avisar visualment sense so retroactiu.
+    async function resumeActivePause() {
+        if (appState.currentState !== 'PAUSA' || !appState.currentPauseType) return;
+        const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+
+        // Volver a activar wake lock si está en pausa
+        await requestWakeLock();
+
+        if (!appState.currentPauseStart) return;
+        const elapsed = new Date() - appState.currentPauseStart;
+        const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
+        const remaining = pauseLimit - elapsed;
+
+        if (remaining > 0) {
+            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma programada a ${timeText}.`;
+            dom.infoMessage.classList.add('success');
+
+            // Temporitzador d'aquesta sessió: amb el temps que FALTA, no el límit sencer
+            startBackgroundAudioKeepAlive(appState.currentPauseType, remaining);
+            const scheduled = await scheduleNotification(appState.currentPauseType, remaining);
+            if (scheduled.ok) {
+                logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
+            } else {
+                showNotificationWarning(`⚠️ No s'ha pogut reprogramar l'alarma en segon pla (${describeScheduleFailure(scheduled.reason)}). Mantingues l'app oberta.`);
+            }
+        } else {
+            // Si el temps de pausa ja ha passat fa estona, NO activar alarma sonora en iniciar l'app
+            logActivity(`ℹ️ La pausa de ${appState.currentPauseType} ja ha superat el temps previst (${timeText}).`);
+            showPauseOverrunNotice();
+        }
+    }
+
     // --- INICIALIZACIÓN OPTIMIZADA PARA VERCEL ---
     async function init() {
         loadState();
-        
+
         // 💾 INICIALITZAR SQLITE I UI D'ESTADÍSTIQUES
         if (window.beta10DB) {
             window.beta10DB.init().then(() => {
@@ -2030,6 +2606,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (window.beta10DBUI) {
                     window.beta10DBUI.init();
                 }
+                // A3: reintentar les escriptures que no es van poder desar
+                return flushDbQueue();
             }).catch(err => {
                 console.error('Error inicialitzant SQLite:', err);
                 logActivity(`⚠️ Error SQLite: ${err.message}`);
@@ -2041,47 +2619,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (wasFixed) {
             logActivity('✅ Estat de l\'app validat i corregit automàticament');
         }
-        
-        // 🔔 SOLICITAR PERMISOS I CONFIGURAR NOTIFICACIONS AL INICI
-        
-        // 1. Permisos de notificación
-        await requestNotificationPermission();
 
-        // 2. Configurar listeners de notificacions natives (recepció i clic)
+        // 🔔 Listeners de notificacions natives: sincrons i abans de qualsevol await, perquè no es perdi
+        // cap esdeveniment (recepció / clic) i perquè la UI no depengui del diàleg de permisos (M10)
         setupNativeNotificationListeners();
-        
-        // 3. Mostrar instrucció important si està en pausa
-        if (appState.currentState === 'PAUSA' && appState.currentPauseType) {
-            const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma programada a ${timeText}.`;
-            dom.infoMessage.classList.add('success');
-            
-            // Volver a activar wake lock si está en pausa
-            await requestWakeLock();
-            
-            // Volver a programar notificación si está en pausa
-            if (appState.currentPauseStart) {
-                const elapsed = new Date() - appState.currentPauseStart;
-                const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
-                const remaining = pauseLimit - elapsed;
-                
-                if (remaining > 0) {
-                    startBackgroundAudioKeepAlive(appState.currentPauseType);
-                    await scheduleNotification(appState.currentPauseType, remaining);
-                    logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
-                } else {
-                    // Si el temps de pausa ja ha passat fa estona, NO activar alarma sonora en iniciar l'app
-                    logActivity(`ℹ️ La pausa de ${appState.currentPauseType} ja ha superat el temps previst (${timeText}).`);
-                }
-            }
-        }
-        
+
         // 🆕 NUEVO: Mostrar información del día al iniciar
         if (appState.currentState !== 'FUERA' && appState.workDayType) {
             const dayInfo = `${appState.workDayType} (${getStandardWorkDayFormatted(appState.workDayStandard)})`;
             logActivity(`📅 Horari d'avui: ${dayInfo}`);
         }
-        
+
         updateUI();
         renderPendingSyncBanner();
 
@@ -2091,7 +2639,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 executePendingSync();
             }
         });
-        
+
         // Actualizar timers cada segundo
         setInterval(() => {
             updateTimers();
@@ -2101,7 +2649,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 lastKnownState = appState.currentState;
             }
         }, 1000);
-        
+
         // 🔍 Validació automàtica cada 30 segons per detectar problemes
         setInterval(() => {
             const wasFixed = validateAppState();
@@ -2109,21 +2657,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 logActivity('🔧 Problema detectat i solucionat automàticament');
             }
         }, 30000); // Cada 30 segons
-        
-        // Petición inicial para calentar GPS
+
+        // Petición inicial para calentar GPS (sense alert: és una arrencada automàtica)
         getCurrentLocation().catch(err => {
-            logActivity(`⚠️ Error inicial GPS: ${err.message}`);
-            // No mostrar alert en inicialización automática
+            logActivity(`⚠️ Error inicial GPS: ${translateError(err)}`);
         }).finally(() => {
             showLoading(false);
         });
-        
+
         // Registrar el Service Worker para PWA (solo en web, no en APK nativa)
         if (!isNativeApp && 'serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js')
                 .then(reg => {
                     logActivity('✅ Service Worker registrat amb èxit.');
-                    
+
                     // Escuchar mensajes del service worker
                     navigator.serviceWorker.addEventListener('message', event => {
                         if (event.data && event.data.type === 'PAUSE_ALARM') {
@@ -2140,7 +2687,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else if (isNativeApp) {
             logActivity('📱 Mode APK Nativa: Alarmes natives en segon pla (AlarmManager) activades');
         }
-        
+
         // Detectar quan l'app perd/guanya focus
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
@@ -2154,20 +2701,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // ELIMINAT: No disparar alarma en tornar al primer pla (foreground-return)
                 // L'alarma només sona mitjançant el sistema de notificacions a la seva hora exacta.
                 updateTimers();
+                // Sí que es verifica que l'alarma nativa segueix programada i, si la pausa ja
+                // ha superat el límit, es mostra un avís visual (sense so).
+                ensurePauseAlarmScheduled().catch(() => {});
+                showPauseOverrunNotice();
             }
         });
-        
+
         logActivity('🚀 Beta10 Control iniciat');
         logActivity('✅ Sistema operatiu amb alarmes millorades');
-        
+
         // Mostrar avís important sobre alarmes
         if (appState.currentState === 'FUERA') {
             setTimeout(() => {
+                // Si hi ha un avís de notificacions/alarma actiu, no es trepitja
+                if (notificationStatus.permission === 'denied' || notificationStatus.channelSilenced) return;
                 // 🆕 NUEVO: Mostrar información del día actual
                 const today = new Date();
                 const todayStandard = getStandardWorkDay(today);
                 const todayType = getDayTypeName(today);
-                
+
                 if (todayStandard === 0) {
                     // Sábado o Domingo
                     dom.infoMessage.textContent = `💰 Avui és ${todayType}: Tot el temps serà hora extra (mínim 30min). Cal afegir observacions.`;
@@ -2175,7 +2728,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     dom.infoMessage.textContent = `📅 Avui és ${todayType} (${getStandardWorkDayFormatted(todayStandard)} estàndard). Mantingues l'app oberta durant les pauses.`;
                 }
                 dom.infoMessage.classList.add('success');
-                
+
                 setTimeout(() => {
                     if (appState.currentState === 'FUERA') {
                         dom.infoMessage.classList.remove('success');
@@ -2183,6 +2736,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }, 10000); // 10 segundos para leer la información
             }, 2000);
+        }
+
+        // 🔔 M10: permisos de notificació, canal i reprogramació de l'alarma d'una pausa en curs.
+        // Al final i sense bloquejar la UI (ja pintada): el diàleg de permisos pot trigar minuts.
+        try {
+            await initNotifications();
+            await resumeActivePause();
+        } catch (error) {
+            logActivity(`❌ Error configurant notificacions: ${error.message}`);
         }
     }
 

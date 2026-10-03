@@ -23,6 +23,12 @@ async function main() {
     require('./tests/test-autocorrection-and-ui.js')(runner);
     require('./tests/test-buttons-and-timers.js')(runner);
     require('./tests/test-whatsapp-modal-and-dual-stats.js')(runner);
+    require('./tests/test-audit-db-stats.js')(runner);
+    require('./tests/test-audit-script-ui.js')(runner);
+    require('./tests/test-fixes-db.js')(runner);
+    require('./tests/test-fixes-script.js')(runner);
+    require('./tests/test-pause-alarms-real.js')(runner);
+    require('./tests/test-fixes-platform.js')(runner);
 
     // Run suites
     await runner.run();

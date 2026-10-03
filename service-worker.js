@@ -1,16 +1,27 @@
-const CACHE_NAME = 'beta10-v6-pause-alarm-fix';
+// Canviar CACHE_NAME en cada release que toqui fitxers de la llista: força el reinici del cache.
+const CACHE_NAME = 'beta10-v7-network-first';
+
+// TOTS els fitxers locals que carrega index.html (i els recursos de l'app) han d'estar aquí perquè
+// l'app arrenqui sense connexió (M13). Hi ha un test que ho comprova contra index.html i el disc.
 const urlsToCache = [
     '/',
     '/index.html',
     '/style.css',
+    '/auth.css',
+    '/error-styles.css',
     '/script.js',
+    '/auth.js',
+    '/beta10-direct.js',
+    '/error-manager.js',
     '/db.js',
     '/db-ui.js',
     '/sql-wasm.js',
     '/sql-wasm.wasm',
     '/alarm.wav',
     '/silence.wav',
-    '/manifest.json'
+    '/manifest.json',
+    '/icon-192.svg',
+    '/icon-512.svg'
 ];
 
 // Variables para manejar alarmas programadas
@@ -22,49 +33,78 @@ self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then(cache => {
-                console.log('✅ Service Worker: Fitxers cachejats');
-                return cache.addAll(urlsToCache);
+                // add() un a un: amb addAll() UN sol 404 feia fallar tota la instal·lació del SW
+                return Promise.all(urlsToCache.map(url =>
+                    cache.add(url).catch(err => console.warn("⚠️ No s'ha pogut cachejar", url, err))
+                ));
             })
+            // El SW nou pren el control sense esperar que es tanquin totes les pestanyes
+            .then(() => self.skipWaiting())
     );
 });
 
-self.addEventListener('fetch', event => {
-    // Solo cachear recursos estáticos, no las API calls
-    if (event.request.url.includes('/api/')) {
-        // Dejar que las API calls pasen directamente (sin cache)
-        return;
+function isCodeRequest(request, url) {
+    return request.mode === 'navigate'
+        || url.pathname === '/'
+        || /\.(?:html|js|css|json)$/.test(url.pathname);
+}
+
+function isCacheable(response) {
+    return response && response.status === 200 && response.type === 'basic';
+}
+
+// Codi i pàgines: XARXA PRIMER. Amb cache-first, un script.js vell quedava servit per sempre
+// (el navegador no tornava a demanar-lo) i els fixos no arribaven mai a l'usuari.
+async function networkFirst(request) {
+    try {
+        const response = await fetch(request);
+        if (isCacheable(response)) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(() => {});
+        }
+        return response;
+    } catch (error) {
+        const cached = await caches.match(request, { ignoreSearch: true });
+        if (cached) return cached;
+        if (request.mode === 'navigate') {
+            const shell = await caches.match('/index.html');
+            if (shell) return shell;
+        }
+        return new Response('Sense connexió i recurs no disponible a la memòria cau', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+        });
     }
-    
-    event.respondWith(
-        caches.match(event.request)
-            .then(response => {
-                // Cache hit - return response
-                if (response) {
-                    console.log('📦 Servint des de cache:', event.request.url);
-                    return response;
-                }
-                
-                // Fetch desde la red
-                console.log('🌐 Fetch des de xarxa:', event.request.url);
-                return fetch(event.request).then(response => {
-                    // Verificar si recibimos una respuesta válida
-                    if (!response || response.status !== 200 || response.type !== 'basic') {
-                        return response;
-                    }
-                    
-                    // Clonar la respuesta
-                    const responseToCache = response.clone();
-                    
-                    caches.open(CACHE_NAME)
-                        .then(cache => {
-                            cache.put(event.request, responseToCache);
-                        });
-                    
-                    return response;
-                });
-            }
-        )
-    );
+}
+
+// Recursos pesats i estables (àudio, wasm, icones): CACHE PRIMER
+async function cacheFirst(request) {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    try {
+        const response = await fetch(request);
+        if (isCacheable(response)) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(() => {});
+        }
+        return response;
+    } catch (error) {
+        return new Response('Sense connexió i recurs no disponible', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+        });
+    }
+}
+
+self.addEventListener('fetch', event => {
+    const request = event.request;
+    // Només GET del mateix origen; res de l'API (sempre xarxa) ni de tercers (fonts, etc.)
+    if (request.method !== 'GET') return;
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin) return;
+    if (url.pathname.startsWith('/api/')) return;
+
+    event.respondWith(isCodeRequest(request, url) ? networkFirst(request) : cacheFirst(request));
 });
 
 self.addEventListener('activate', event => {
@@ -79,7 +119,7 @@ self.addEventListener('activate', event => {
                     }
                 })
             );
-        })
+        }).then(() => self.clients.claim())
     );
 });
 
@@ -107,6 +147,9 @@ self.addEventListener('message', event => {
 });
 
 // 🔔 Programar notificación
+// LIMITACIÓ (plataforma, no corregible aquí): aquest setTimeout viu només mentre el navegador
+// mantingui viu el service worker. Amb el navegador tancat o la pantalla apagada Chrome/Android
+// pot aturar el SW i l'alarma NO sonarà. L'alarma fiable és la de l'APK (AlarmManager nadiu).
 function scheduleNotification(pauseType, delayMs, timeLimit) {
     console.log(`🔔 Programando notificación: ${pauseType} en ${delayMs}ms (${timeLimit}min)`);
     

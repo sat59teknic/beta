@@ -4,98 +4,69 @@
  */
 
 const { assert, assertEqual, assertDeepEqual } = require('../test-harness.js');
+const { createClock, loadScriptApp } = require('../test-fake-app.js');
 
 module.exports = function registerScheduleTests(runner) {
     runner.suite('Workday Schedules & Overtime Calculation', async (suite) => {
 
-        // Pure functions replicated from script.js
-        function getStandardWorkDay(date = new Date()) {
-            const dayOfWeek = date.getDay();
-            if (dayOfWeek >= 1 && dayOfWeek <= 4) { // Lunes a Jueves
-                return 9;
-            } else if (dayOfWeek === 5) { // Viernes
-                return 9;
-            } else if (dayOfWeek === 6 || dayOfWeek === 0) { // Sábado o Domingo
-                return 0; // Todo son horas extra
-            }
-            return 9;
+        // Se ejecuta el script.js REAL (vm + DOM falso, ver scripts/test-fake-app.js): antes este
+        // fichero probaba una REPLICA de las funciones (con viernes = 9h, que no es lo que hace la app).
+        const baseState = (over = {}) => ({
+            currentState: 'JORNADA', workStartTime: null, currentPauseStart: null, currentPauseType: null,
+            totalPauseTimeToday: 0, currentLocation: null, isAlarmPlaying: false, pauseAlarmTriggered: false,
+            lastAlarmTime: null, alarmSource: null, wakeLock: null, wakeLockLost: false,
+            workDayStandard: null, workDayType: null, workStartDay: null, breakfastDate: null, ...over
+        });
+
+        async function realApp(fakeNow) {
+            return loadScriptApp({ clock: createClock(fakeNow || new Date('2026-09-30T12:00:00Z')) });
         }
 
-        function getDayTypeName(date = new Date()) {
-            const dayOfWeek = date.getDay();
-            if (dayOfWeek === 5) return "Divendres";
-            if (dayOfWeek >= 1 && dayOfWeek <= 4) return "Dilluns-Dijous";
-            if (dayOfWeek === 6) return "Dissabte";
-            if (dayOfWeek === 0) return "Diumenge";
-            return "Desconegut";
+        const getStandardWorkDay = async (date) => (await realApp()).t.getStandardWorkDay(date);
+        const getDayTypeName = async (date) => (await realApp()).t.getDayTypeName(date);
+
+        // Mismo contrato que la antigua réplica, pero llamando a calculateExtraHours() real
+        async function calculateExtraHoursMock(workStartTime, totalPauseMs, currentState, currentPauseStart, standardWorkDay, fakeNow) {
+            const app = await realApp(fakeNow);
+            app.t.setState(baseState({
+                currentState,
+                workStartTime,
+                totalPauseTimeToday: totalPauseMs,
+                currentPauseStart,
+                currentPauseType: currentPauseStart ? 'dinar' : null,
+                workDayStandard: standardWorkDay
+            }));
+            return app.t.calculateExtraHours();
         }
 
-        function calculateExtraHoursMock(workStartTime, totalPauseMs, currentState, currentPauseStart, standardWorkDay, fakeNow) {
-            if (!workStartTime) return { extraHours: 0, workedExtraHours: 0, remuneratedExtraHours: 0, totalHours: 0, extraBlocks: 0, standardWorkDay: 9 };
-
-            const now = fakeNow || new Date();
-            const workDuration = now - workStartTime - totalPauseMs;
-            let currentPauseDuration = 0;
-
-            if (currentState === 'PAUSA' && currentPauseStart) {
-                currentPauseDuration = now - currentPauseStart;
-            }
-
-            const totalWorkTime = workDuration / (1000 * 60 * 60);
-            const totalPauseTime = (totalPauseMs + currentPauseDuration) / (1000 * 60 * 60);
-            const totalJourneyTime = totalWorkTime + totalPauseTime;
-
-            const extraTime = Math.max(0, totalJourneyTime - standardWorkDay);
-
-            let workedExtraHours = 0;
-            if (standardWorkDay === 0) {
-                workedExtraHours = totalJourneyTime;
-            } else {
-                workedExtraHours = extraTime;
-            }
-
-            // Blocs de 30 minuts per dia (>30m: 0.5h, 45m: 0.5h, <30m: 0h)
-            const extraBlocks = Math.floor((workedExtraHours + 0.0001) / 0.5);
-            const remuneratedExtraHours = extraBlocks * 0.5;
-
-            return {
-                extraHours: workedExtraHours,
-                workedExtraHours,
-                remuneratedExtraHours,
-                totalHours: totalJourneyTime,
-                extraBlocks,
-                standardWorkDay
-            };
-        }
-
-        suite.test('Standard workday: 9h for Monday through Friday', () => {
+        suite.test('Standard workday: 9h Monday-Thursday, 8h Friday', async () => {
             // Monday
             const monday = new Date('2026-09-28T10:00:00');
-            assertEqual(getStandardWorkDay(monday), 9, 'Monday should have 9h standard');
-            assertEqual(getDayTypeName(monday), 'Dilluns-Dijous');
+            assertEqual(await getStandardWorkDay(monday), 9, 'Monday should have 9h standard');
+            assertEqual(await getDayTypeName(monday), 'Dilluns-Dijous');
 
             // Friday
             const friday = new Date('2026-10-02T10:00:00');
-            assertEqual(getStandardWorkDay(friday), 9, 'Friday should have 9h standard');
-            assertEqual(getDayTypeName(friday), 'Divendres');
+            assertEqual(await getStandardWorkDay(friday), 8, 'Friday has 8h standard (real getStandardWorkDay)');
+            assertEqual(await getDayTypeName(friday), 'Divendres');
         });
 
-        suite.test('Weekend standard workday: 0h for Saturday and Sunday', () => {
+        suite.test('Weekend standard workday: 0h for Saturday and Sunday', async () => {
             // Saturday
             const saturday = new Date('2026-10-03T10:00:00');
-            assertEqual(getStandardWorkDay(saturday), 0, 'Saturday should have 0h standard (all overtime)');
-            assertEqual(getDayTypeName(saturday), 'Dissabte');
+            assertEqual(await getStandardWorkDay(saturday), 0, 'Saturday should have 0h standard (all overtime)');
+            assertEqual(await getDayTypeName(saturday), 'Dissabte');
 
             // Sunday
             const sunday = new Date('2026-10-04T10:00:00');
-            assertEqual(getStandardWorkDay(sunday), 0, 'Sunday should have 0h standard (all overtime)');
-            assertEqual(getDayTypeName(sunday), 'Diumenge');
+            assertEqual(await getStandardWorkDay(sunday), 0, 'Sunday should have 0h standard (all overtime)');
+            assertEqual(await getDayTypeName(sunday), 'Diumenge');
         });
 
-        suite.test('Overtime: Normal 8h workday (no overtime)', () => {
+        suite.test('Overtime: Normal 8h workday (no overtime)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T16:00:00Z'); // 8h
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 8);
             assertEqual(result.workedExtraHours, 0, 'Under 9h standard must have 0 extra hours');
@@ -103,10 +74,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 0);
         });
 
-        suite.test('Overtime threshold: 23min extra (<30min) -> 0h remunerated, 0.38h worked extra', () => {
+        suite.test('Overtime threshold: 23min extra (<30min) -> 0h remunerated, 0.38h worked extra', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T17:23:00Z'); // 9h 23min
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(Math.round(result.totalHours * 100) / 100, 9.38);
             assertEqual(Math.round(result.workedExtraHours * 100) / 100, 0.38, 'Worked extra must be 0.38h (23min)');
@@ -114,10 +85,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 0);
         });
 
-        suite.test('Overtime threshold: 45min extra -> 0.5h remunerated, 0.75h worked extra (15min discarded)', () => {
+        suite.test('Overtime threshold: 45min extra -> 0.5h remunerated, 0.75h worked extra (15min discarded)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T17:45:00Z'); // 9h 45min
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 9.75);
             assertEqual(result.workedExtraHours, 0.75, 'Worked extra must be 0.75h (45min)');
@@ -125,10 +96,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 1);
         });
 
-        suite.test('Overtime recognized: 9h 30min -> 1 block of 30min (0.5h remunerated)', () => {
+        suite.test('Overtime recognized: 9h 30min -> 1 block of 30min (0.5h remunerated)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T17:30:00Z'); // 9h 30min
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 9.5);
             assertEqual(result.workedExtraHours, 0.5);
@@ -136,10 +107,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 1);
         });
 
-        suite.test('Overtime recognized: 1h 15min extra (10h 15min total) -> 1.0h remunerated (2 blocks)', () => {
+        suite.test('Overtime recognized: 1h 15min extra (10h 15min total) -> 1.0h remunerated (2 blocks)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T18:15:00Z'); // 10h 15min -> 1h 15min extra
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 10.25);
             assertEqual(result.workedExtraHours, 1.25);
@@ -147,10 +118,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 2);
         });
 
-        suite.test('Overtime recognized: 1h 45min extra (10h 45min total) -> 1.5h remunerated (3 blocks)', () => {
+        suite.test('Overtime recognized: 1h 45min extra (10h 45min total) -> 1.5h remunerated (3 blocks)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T18:45:00Z'); // 10h 45min -> 1h 45min extra
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 10.75);
             assertEqual(result.workedExtraHours, 1.75);
@@ -158,10 +129,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 3);
         });
 
-        suite.test('Overtime recognized: 11h total (2h extra) -> 4 blocks of 30min (2.0h)', () => {
+        suite.test('Overtime recognized: 11h total (2h extra) -> 4 blocks of 30min (2.0h)', async () => {
             const start = new Date('2026-09-30T08:00:00Z');
             const end = new Date('2026-09-30T19:00:00Z'); // 11h
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 9, end);
 
             assertEqual(result.totalHours, 11);
             assertEqual(result.workedExtraHours, 2.0);
@@ -169,14 +140,14 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(result.extraBlocks, 4);
         });
 
-        suite.test('Daily Reset / Non-accumulation: 2 days of 23min extra NEVER accumulate to 0.5h', () => {
+        suite.test('Daily Reset / Non-accumulation: 2 days of 23min extra NEVER accumulate to 0.5h', async () => {
             const day1Start = new Date('2026-09-28T08:00:00Z');
             const day1End = new Date('2026-09-28T17:23:00Z'); // 23min extra
-            const day1 = calculateExtraHoursMock(day1Start, 0, 'JORNADA', null, 9, day1End);
+            const day1 = await calculateExtraHoursMock(day1Start, 0, 'JORNADA', null, 9, day1End);
 
             const day2Start = new Date('2026-09-29T08:00:00Z');
             const day2End = new Date('2026-09-29T17:23:00Z'); // 23min extra
-            const day2 = calculateExtraHoursMock(day2Start, 0, 'JORNADA', null, 9, day2End);
+            const day2 = await calculateExtraHoursMock(day2Start, 0, 'JORNADA', null, 9, day2End);
 
             assertEqual(day1.remuneratedExtraHours, 0, 'Day 1 remunerated must be 0h');
             assertEqual(day2.remuneratedExtraHours, 0, 'Day 2 remunerated must be 0h');
@@ -188,10 +159,10 @@ module.exports = function registerScheduleTests(runner) {
             assertEqual(Math.round(totalWorkedExtraMonth * 100) / 100, 0.77, 'Total worked extra captures 46min (~0.77h)');
         });
 
-        suite.test('Weekend overtime: Saturday 4h total -> all 4h are overtime (8 blocks)', () => {
+        suite.test('Weekend overtime: Saturday 4h total -> all 4h are overtime (8 blocks)', async () => {
             const start = new Date('2026-10-03T08:00:00Z');
             const end = new Date('2026-10-03T12:00:00Z'); // 4h
-            const result = calculateExtraHoursMock(start, 0, 'JORNADA', null, 0, end);
+            const result = await calculateExtraHoursMock(start, 0, 'JORNADA', null, 0, end);
 
             assertEqual(result.totalHours, 4.0);
             assertEqual(result.workedExtraHours, 4.0, 'On weekend, entire duration is extra hours');

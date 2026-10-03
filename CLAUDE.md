@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - No environment variables needed (credentials stored client-side)
 
 ### Testing Commands
-- No specific test commands configured
+- `npm test` - suite completa sin red (ver la sección Pruebas más abajo)
 - Manual testing through PWA interface
 - Use `/api/health` endpoint for backend connectivity checks
 
@@ -145,3 +145,71 @@ FUERA (Out) → JORNADA (Working) → PAUSA (Break) → JORNADA → FUERA
 - **V7**: Persistent cookie management for Beta10 sessions
 
 This application is production-ready and designed for enterprise use with multiple employees.
+## Reglas de cálculo de horas (decisiones consolidadas)
+
+- **M1 - la jornada total INCLUYE las pausas.** `calculateExtraHours()` usa el tiempo transcurrido desde el
+  inicio (esmorzar y dinar NO se restan) y lo compara con el horario del día (L-J 9 h, V 8 h, S/D 0 h = todo
+  extra). Lo que se resta de las pausas es solo el campo "treballat" (`worked_hours`) que se guarda en SQLite.
+  Es una decisión de negocio: no cambiarla sin hablar con el usuario. La UI lo indica ("Total Jornada (amb pauses)").
+- **Extra remunerada**: bloques completos de 30 min **por día** (`floor(extra / 0.5) * 0.5`); los minutos sueltos
+  no se acumulan entre días. En SQLite el resumen mensual agrega por día: con varias jornadas el mismo día se
+  suman sus extras reales y se aplica el bloque al total del día (M5); una jornada única respeta su
+  `remunerated_extra_hours` guardado. `days_with_extra` cuenta días distintos (L7) y `total_worked_hours` es el
+  total del mes entero (incluye días sin extra).
+- **M2/M4**: en PAUSA la pausa en curso ya está dentro del tiempo transcurrido (no se vuelve a sumar), y al
+  finalizar la jornada las extras se calculan **una sola vez** (al pulsar el botón); ese resultado decide el modal,
+  el texto y lo que se guarda.
+- **M6**: una pausa que supera 1 h se cierra automáticamente contando solo el máximo previsto (15/30 min) en la
+  jornada, pero la pausa REAL se registra en la tabla `pausas` con su duración real.
+
+## Persistencia y migraciones (db.js)
+
+- Las migraciones usan `PRAGMA table_info` y `PRAGMA user_version` (versión actual 1) y son idempotentes. Al añadir
+  `remunerated_extra_hours` a una BD antigua se rellena el histórico con `floor(extra / 0.5) * 0.5`.
+- `persist()` propaga los errores de IndexedDB y serializa los desados (cola). Las escrituras (`record*`, `update*`,
+  `delete*`) deshacen el cambio en memoria si no se pudo persistir, para que un reintento no duplique filas.
+- script.js mantiene una cola persistente (`beta10_pending_db_writes`) de escrituras SQLite fallidas que se
+  reintenta al arrancar la BD; los fichajes pendientes de Beta10 viven en `beta10_pending_sync` (varios, con su
+  hora original).
+- La restauración valida el esquema (columnas) y el `quick_check`, guarda un snapshot de la BD anterior (memoria +
+  IndexedDB) y la persiste ANTES de cerrar la antigua; "Desfer l'última restauració" la recupera.
+- Backup en el APK: `<a download>` no descarga nada en el WebView de Capacitor. Si están los plugins
+  `@capacitor/filesystem` y `@capacitor/share` se usa el menú de compartir; si no, la app NO simula éxito y ofrece la
+  copia en texto (Base64). Los plugins no se han añadido a `package.json` (decisión pendiente del usuario).
+
+## Alarmas y notificaciones de pausa
+
+- **APK**: `LocalNotifications.schedule` con id fijo 1001 (reemplaza, nunca duplica), `allowWhileIdle: true`,
+  canal `pause_alarm_channel_v4` (importancia máxima, `alarm.wav` en `res/raw`, vibración, visible en bloqueo), icono
+  monocromo `ic_stat_pause_alarm` (lo crea `scripts/prepare-android.js`). Tras programar se verifica con `getPending`.
+  Se pide POST_NOTIFICATIONS (Android 13+) y, si Android 12+ no permite alarmas exactas, se ofrece abrir Ajustes
+  (una vez) y cada pausa muestra un aviso. Todo fallo de programación se muestra al usuario (caja roja), no solo en el registro.
+- Al reabrir la app con una pausa en curso se reprograma con el tiempo RESTANTE y se comprueba de nuevo al volver al
+  primer plano; si el límite ya pasó se muestra un aviso sin sonido retroactivo. Tras un reinicio del móvil el
+  plugin restaura las notificaciones guardadas (RECEIVE_BOOT_COMPLETED).
+- `isAlarmPlaying`, `wakeLock`, `wakeLockLost` y `alarmSource` NO se persisten (un valor obsoleto silenciaba todas
+  las alarmas siguientes).
+- Los canales de Android son inmutables: si hay que cambiar sonido/importancia hay que subir el id del canal
+  (`NATIVE_ALARM_CHANNEL_ID`) y añadir el anterior a `LEGACY_ALARM_CHANNEL_IDS`.
+- **Web/PWA - limitaciones de plataforma (no corregibles)**: el temporizador del service worker y el de la página
+  mueren si el navegador los suspende (pantalla apagada, pestaña en segundo plano, SW detenido). La alarma web solo
+  es fiable con la app abierta; la fiable es la del APK. Doze/ahorro de batería de algunos fabricantes (Xiaomi,
+  Huawei, Samsung...) puede retrasar o matar la app: excluir la app de la optimización de batería.
+- Servicio de la PWA: `service-worker.js` usa red primero para HTML/JS/CSS (evita scripts viejos) y caché primero para
+  audio/wasm/iconos. Subir `CACHE_NAME` al cambiar la lista de ficheros.
+
+## Build Android
+
+1. `npm run build` (copia los estáticos a `www/`), `npx cap add android` / `npx cap sync android`.
+2. `node scripts/prepare-android.js` (idempotente): permisos, `alarm.wav` -> `res/raw`, icono de notificación, firma
+   debug y release con `debug.keystore`, sin tráfico en claro. **Falla** si falta `debug.keystore`, `alarm.wav`, el
+   manifest o el gradle.
+3. Aviso: `debug.keystore` está en el repositorio (contraseña pública `android`) y también firma release.
+   Es lo que mantiene la firma entre actualizaciones, pero cualquiera con el repo puede firmar un APK con esa clave.
+
+## Pruebas
+
+`npm test` en `beta/` (sin red; fetch, IndexedDB, Capacitor, GPS y service worker simulados). Los tests de script.js,
+db-ui.js y el service worker ejecutan el **código real** en `vm` (`scripts/test-fake-app.js`). Los tests antiguos
+`test-alarm-and-notifications.js`, `test-pause-and-resilience.js` y similares prueban réplicas con mocks del arnés;
+la cobertura real de alarmas está en `test-pause-alarms-real.js`.

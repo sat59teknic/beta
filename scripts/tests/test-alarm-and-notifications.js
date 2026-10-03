@@ -14,7 +14,7 @@ module.exports = function registerAlarmTests(runner) {
 
             // Simulate initNativeNotificationChannel
             await env.capacitor.Plugins.LocalNotifications.createChannel({
-                id: 'pause_alarm_channel_v3',
+                id: 'pause_alarm_channel_v4',
                 name: 'Alarmes de Pausa',
                 importance: 5,
                 sound: 'alarm.wav',
@@ -38,7 +38,7 @@ module.exports = function registerAlarmTests(runner) {
 
             const channels = env.capacitor.Plugins.LocalNotifications.__getChannels();
             assertEqual(channels.length, 1);
-            assertEqual(channels[0].id, 'pause_alarm_channel_v3');
+            assertEqual(channels[0].id, 'pause_alarm_channel_v4');
             assertEqual(channels[0].sound, 'alarm.wav');
 
             const actionTypes = env.capacitor.Plugins.LocalNotifications.__getActionTypes();

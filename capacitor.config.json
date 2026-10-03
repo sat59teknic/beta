@@ -3,8 +3,7 @@
   "appName": "9T Beta10",
   "webDir": "www",
   "server": {
-    "androidScheme": "https",
-    "cleartext": true
+    "androidScheme": "https"
   },
   "plugins": {
     "CapacitorHttp": {
@@ -14,11 +13,8 @@
       "enabled": true
     },
     "LocalNotifications": {
-      "smallIcon": "ic_launcher_round",
+      "smallIcon": "ic_stat_pause_alarm",
       "iconColor": "#E74C3C"
     }
-  },
-  "android": {
-    "allowMixedContent": true
   }
 }

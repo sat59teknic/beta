@@ -34,7 +34,7 @@ module.exports = function registerPauseResilienceTests(runner) {
                     {
                         id: 1001,
                         title: '⏰ Temps de pausa completat!',
-                        channelId: 'pause_alarm_channel_v3',
+                        channelId: 'pause_alarm_channel_v4',
                         actionTypeId: 'PAUSE_ALARM_ACTIONS'
                     }
                 ]

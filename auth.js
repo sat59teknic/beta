@@ -7,6 +7,16 @@ class AuthManager {
         this.credentials = null;
     }
 
+    // M11: text d'usuari dins d'innerHTML sempre escapat
+    escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     // Encriptar credenciales de forma simple pero segura
     encrypt(text) {
         const encoded = btoa(unescape(encodeURIComponent(text)));
@@ -278,7 +288,7 @@ class AuthManager {
                 <div class="auth-account-info">
                     <div class="auth-field">
                         <label>Usuari actual</label>
-                        <div class="auth-user-display">${creds.username}</div>
+                        <div class="auth-user-display">${this.escapeHtml(creds.username)}</div>
                     </div>
                     
                     <div class="auth-field">
