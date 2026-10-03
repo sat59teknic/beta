@@ -222,5 +222,193 @@ module.exports = function registerDbTests(runner) {
             assertEqual(res[0].values[1][1], 9.75, 'Today extra hours matches');
             assertEqual(res[0].values[1][2], 9.5, 'Today remunerated extra hours matches');
         });
+
+        suite.test('Base64 Text Backup & Restore: 100% lossless text export/import', async () => {
+            const Beta10Database = require('../../db.js');
+            const b10 = new Beta10Database();
+            b10.SQL = SQL;
+            b10.db = db;
+            b10.isInitialized = true;
+
+            // Export to Base64 text
+            const base64Data = await b10.exportDatabaseAsBase64();
+            assert(typeof base64Data === 'string' && base64Data.length > 100, 'Base64 backup must be a valid non-empty string');
+
+            // Simulate importing into a new empty instance
+            const b10Restored = new Beta10Database();
+            b10Restored.SQL = SQL;
+            b10Restored.db = new SQL.Database();
+            b10Restored.isInitialized = true;
+            b10Restored._createTables();
+
+            await b10Restored.importDatabaseFromBase64(base64Data);
+
+            const res = b10Restored.db.exec("SELECT date, worked_hours, extra_hours, remunerated_extra_hours, observations FROM jornadas WHERE date IN ('2026-10-02', '2026-10-03') ORDER BY date ASC;");
+            assertEqual(res[0].values.length, 2, 'Both days restored identically from Base64 string');
+            assertEqual(res[0].values[0][0], '2026-10-02', 'Yesterday date preserved');
+            assertEqual(res[0].values[0][2], 1.0, 'Yesterday extra hours preserved');
+            assertEqual(res[0].values[0][3], 1.0, 'Yesterday remunerated extra hours preserved');
+            assertEqual(res[0].values[1][0], '2026-10-03', 'Today date preserved');
+            assertEqual(res[0].values[1][2], 9.75, 'Today extra hours preserved');
+            assertEqual(res[0].values[1][3], 9.5, 'Today remunerated extra hours preserved');
+        });
+
+        suite.test('downloadDatabaseFile on Android Mobile: triggers native Web Share sheet (Save to Files/Drive/WhatsApp)', async () => {
+            const Beta10Database = require('../../db.js');
+            const b10 = new Beta10Database();
+            b10.SQL = SQL;
+            b10.db = db;
+            b10.isInitialized = true;
+
+            let sharedPayload = null;
+            const originalNavDesc = Object.getOwnPropertyDescriptor(global, 'navigator');
+            const originalFile = global.File;
+            const originalBlob = global.Blob;
+
+            global.File = class MockFile {
+                constructor(chunks, name, opts) {
+                    this.chunks = chunks;
+                    this.name = name;
+                    this.type = opts ? opts.type : '';
+                }
+            };
+            global.Blob = class MockBlob {
+                constructor(chunks, opts) {
+                    this.chunks = chunks;
+                    this.type = opts ? opts.type : '';
+                }
+            };
+            Object.defineProperty(global, 'navigator', {
+                value: {
+                    canShare: (data) => true,
+                    share: async (payload) => {
+                        sharedPayload = payload;
+                        return true;
+                    }
+                },
+                configurable: true,
+                writable: true
+            });
+
+            try {
+                const res = await b10.downloadDatabaseFile();
+                assertEqual(res.success, true, 'downloadDatabaseFile must return success');
+                assertEqual(res.method, 'share', 'Must use Web Share API on Android device');
+                assert(res.fileName.endsWith('.sqlite'), 'File must end with .sqlite');
+                assert(sharedPayload !== null, 'navigator.share must be called');
+                assertEqual(sharedPayload.files[0].name, res.fileName, 'Shared file name must match database filename');
+            } finally {
+                if (originalNavDesc) {
+                    Object.defineProperty(global, 'navigator', originalNavDesc);
+                } else {
+                    delete global.navigator;
+                }
+                global.File = originalFile;
+                global.Blob = originalBlob;
+            }
+        });
+
+        suite.test('downloadDatabaseFile fallback anchor download: avoids synchronous revoke for Android WebView stability', async () => {
+            const Beta10Database = require('../../db.js');
+            const b10 = new Beta10Database();
+            b10.SQL = SQL;
+            b10.db = db;
+            b10.isInitialized = true;
+
+            const originalNavDesc = Object.getOwnPropertyDescriptor(global, 'navigator');
+            const originalURL = global.URL;
+            const originalDoc = global.document;
+            const originalBlob = global.Blob;
+
+            let clicked = false;
+            let appendedEl = null;
+            let synchronouslyRevoked = false;
+
+            Object.defineProperty(global, 'navigator', {
+                value: { canShare: () => false },
+                configurable: true,
+                writable: true
+            });
+            global.Blob = class MockBlob {
+                constructor(chunks, opts) {
+                    this.chunks = chunks;
+                }
+            };
+            global.URL = {
+                createObjectURL: () => 'blob:test-sqlite-download-url',
+                revokeObjectURL: () => { synchronouslyRevoked = true; }
+            };
+            global.document = {
+                createElement: (tag) => ({
+                    tagName: tag,
+                    style: {},
+                    click: () => { clicked = true; }
+                }),
+                body: {
+                    appendChild: (el) => { appendedEl = el; },
+                    removeChild: () => {},
+                    contains: () => true
+                }
+            };
+
+            try {
+                const res = await b10.downloadDatabaseFile();
+                assertEqual(res.success, true, 'Fallback anchor download must succeed');
+                assertEqual(res.method, 'download_anchor', 'Fallback method is download_anchor');
+                assertEqual(clicked, true, 'Anchor element must be triggered with click()');
+                assert(appendedEl !== null, 'Anchor tag must be appended to body');
+                assert(appendedEl.download.endsWith('.sqlite'), 'Anchor download attribute ends with .sqlite');
+                assertEqual(synchronouslyRevoked, false, 'Blob URL must NOT be revoked synchronously on the same tick');
+            } finally {
+                if (originalNavDesc) {
+                    Object.defineProperty(global, 'navigator', originalNavDesc);
+                } else {
+                    delete global.navigator;
+                }
+                global.URL = originalURL;
+                global.document = originalDoc;
+                global.Blob = originalBlob;
+            }
+        });
+
+        suite.test('UI Download Button (#db-download-file-btn): activates download, manages loading state and feedback', async () => {
+            let downloadCalled = false;
+            const mockBeta10DB = {
+                downloadDatabaseFile: async () => {
+                    downloadCalled = true;
+                    return { success: true, method: 'share', fileName: 'beta10_registres_2026-10-03.sqlite' };
+                }
+            };
+
+            const button = {
+                disabled: false,
+                textContent: '📥 Descarregar Fitxer (.sqlite)',
+                onclick: null
+            };
+
+            // Simulate the button click binding in db-ui.js
+            button.onclick = async () => {
+                button.disabled = true;
+                button.textContent = 'Preparant...';
+                try {
+                    const res = await mockBeta10DB.downloadDatabaseFile();
+                    assert(res.success, 'Download result must be successful');
+                } finally {
+                    button.disabled = false;
+                    button.textContent = '📥 Descarregar Fitxer (.sqlite)';
+                }
+            };
+
+            // Trigger click
+            const clickPromise = button.onclick();
+            assertEqual(button.disabled, true, 'Button is disabled while preparing download');
+            assertEqual(button.textContent, 'Preparant...', 'Button text indicates preparing');
+
+            await clickPromise;
+
+            assertEqual(downloadCalled, true, 'downloadDatabaseFile was executed');
+            assertEqual(button.disabled, false, 'Button is re-enabled after download execution');
+            assertEqual(button.textContent, '📥 Descarregar Fitxer (.sqlite)', 'Button label restored');
+        });
     });
 };

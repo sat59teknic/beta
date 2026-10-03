@@ -18,6 +18,7 @@ class Beta10Database {
      * Inicialitza la base de dades SQLite
      */
     async init() {
+        if (this.isInitialized && this.db) return true;
         if (this.initPromise) return this.initPromise;
 
         this.initPromise = (async () => {
@@ -25,11 +26,19 @@ class Beta10Database {
                 console.log('🔄 Inicialitzant SQLite (sql.js Wasm)...');
 
                 // 1. Carregar el mòdul Wasm de sql.js
-                if (typeof initSqlJs !== 'function') {
+                const sqlInitFn = (typeof initSqlJs === 'function') 
+                    ? initSqlJs 
+                    : (typeof window !== 'undefined' && typeof window.initSqlJs === 'function')
+                        ? window.initSqlJs
+                        : (typeof global !== 'undefined' && typeof global.initSqlJs === 'function')
+                            ? global.initSqlJs
+                            : null;
+
+                if (!sqlInitFn) {
                     throw new Error('initSqlJs no està disponible. Assegura\'t de carregar sql-wasm.js abans.');
                 }
 
-                this.SQL = await initSqlJs({
+                this.SQL = await sqlInitFn({
                     locateFile: (file) => file
                 });
 
@@ -135,6 +144,7 @@ class Beta10Database {
      * Obre connexió amb IndexedDB
      */
     _openIndexedDB() {
+        if (typeof indexedDB === 'undefined') return Promise.resolve(null);
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.IDB_NAME, 1);
             request.onupgradeneeded = (e) => {
@@ -152,7 +162,9 @@ class Beta10Database {
      * Desa bytes a IndexedDB
      */
     async _saveToIndexedDB(bytes) {
+        if (typeof indexedDB === 'undefined') return true;
         const idb = await this._openIndexedDB();
+        if (!idb) return true;
         return new Promise((resolve, reject) => {
             const tx = idb.transaction(this.IDB_STORE, 'readwrite');
             const store = tx.objectStore(this.IDB_STORE);
@@ -166,7 +178,9 @@ class Beta10Database {
      * Carrega bytes des d'IndexedDB
      */
     async _loadFromIndexedDB() {
+        if (typeof indexedDB === 'undefined') return null;
         const idb = await this._openIndexedDB();
+        if (!idb) return null;
         return new Promise((resolve, reject) => {
             const tx = idb.transaction(this.IDB_STORE, 'readonly');
             const store = tx.objectStore(this.IDB_STORE);
@@ -452,20 +466,99 @@ class Beta10Database {
 
     /**
      * Exporta i descarrega el fitxer .sqlite al dispositiu de l'usuari
+     * Suporta Web Share API a Android per obrir el menú natiu de desar o compartir
      */
     async downloadDatabaseFile() {
         await this.init();
         const binaryArray = this.db.export();
         const blob = new Blob([binaryArray], { type: 'application/x-sqlite3' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
         const today = this.formatDate(new Date());
-        a.download = `beta10_registres_${today}.sqlite`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        const fileName = `beta10_registres_${today}.sqlite`;
+
+        // 1. MÈTODE 1: Android WebView / Mòbil (Web Share API)
+        // A Android WebView aquest mètode permet desar directament a Descàrregues / Drive / WhatsApp
+        const nav = typeof navigator !== 'undefined' ? navigator : null;
+        if (nav && typeof nav.canShare === 'function' && typeof File !== 'undefined') {
+            try {
+                const file = new File([blob], fileName, { type: 'application/x-sqlite3' });
+                if (nav.canShare({ files: [file] }) && typeof nav.share === 'function') {
+                    await nav.share({
+                        files: [file],
+                        title: fileName,
+                        text: 'Còpia de seguretat SQLite Beta10'
+                    });
+                    return { success: true, method: 'share', fileName };
+                }
+            } catch (shareErr) {
+                if (shareErr.name === 'AbortError') {
+                    return { success: true, method: 'cancelled_by_user', fileName };
+                }
+                console.warn('Web Share no disponible, provant descàrrega directa:', shareErr);
+            }
+        }
+
+        // 2. MÈTODE 2: Descàrrega directa amb retard de revoke (evita cancel·lació a WebView)
+        if (typeof URL !== 'undefined' && typeof document !== 'undefined') {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.target = '_blank';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+
+            // Marge de 60s per assegurar que el sistema no cancel·li el blob abans de baixar-lo
+            setTimeout(() => {
+                if (document.body && document.body.contains(a)) document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 60000);
+
+            return { success: true, method: 'download_anchor', fileName };
+        }
+
+        return { success: true, method: 'bytes_exported', fileName };
+    }
+
+    /**
+     * Exporta la base de dades a una cadena Base64 per a còpia ràpida en text
+     */
+    async exportDatabaseAsBase64() {
+        await this.init();
+        const binaryArray = this.db.export();
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(binaryArray).toString('base64');
+        }
+        const bytes = new Uint8Array(binaryArray);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode.apply(null, chunk);
+        }
+        return btoa(binary);
+    }
+
+    /**
+     * Importa i restaura la base de dades des d'una cadena Base64
+     */
+    async importDatabaseFromBase64(base64Str) {
+        if (!base64Str || typeof base64Str !== 'string') {
+            throw new Error("El text de la còpia és buit o no és vàlid.");
+        }
+        const cleanBase64 = base64Str.trim().replace(/^data:.*?;base64,/, '');
+        if (typeof Buffer !== 'undefined') {
+            const buf = Buffer.from(cleanBase64, 'base64');
+            const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+            return await this.importDatabaseFile(ab);
+        }
+        const binary = atob(cleanBase64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return await this.importDatabaseFile(bytes.buffer);
     }
 
     /**
@@ -521,4 +614,10 @@ class Beta10Database {
 }
 
 // Instància singleton global
-window.beta10DB = new Beta10Database();
+if (typeof window !== 'undefined') {
+    window.beta10DB = new Beta10Database();
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Beta10Database;
+}

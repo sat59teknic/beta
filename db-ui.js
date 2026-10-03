@@ -540,15 +540,25 @@ class Beta10DBUI {
 
         container.innerHTML = `
             <div class="db-jornadas-container">
-                <div class="db-section-header">
-                    <h4>Historial de Jornades</h4>
-                    <span class="db-badge-count">Total: ${jornadas.length}</span>
+                <div class="db-section-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div>
+                        <h4 style="margin:0;">Historial de Jornades</h4>
+                        <span class="db-badge-count">Total: ${jornadas.length}</span>
+                    </div>
+                    <button class="btn btn-start" id="btn-add-manual-jornada" style="font-size:12px;padding:6px 12px;border-radius:8px;">
+                        ➕ Afegir Manual
+                    </button>
                 </div>
                 <div class="db-jornadas-list">
                     ${listHtml}
                 </div>
             </div>
         `;
+
+        const addManualBtn = container.querySelector('#btn-add-manual-jornada');
+        if (addManualBtn) {
+            addManualBtn.onclick = () => this.openAddManualJornadaModal();
+        }
 
         // Listeners per corregir pauses anòmales (ex: 191m)
         container.querySelectorAll('.btn-fix-pause').forEach(btn => {
@@ -583,6 +593,92 @@ class Beta10DBUI {
             };
         });
 
+    }
+
+    /**
+     * Modal per a afegir manualment una jornada (per si mai es vol registrar ahir o avui)
+     */
+    openAddManualJornadaModal() {
+        const today = new Date().toISOString().split('T')[0];
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 420px; text-align: left;">
+                <h3 style="margin-top:0;">➕ Afegir Jornada Manual</h3>
+                <p class="modal-subtitle">Introdueix les dades de la jornada (ex: ahir o avui):</p>
+                
+                <div style="display:flex;flex-direction:column;gap:10px;margin:15px 0;">
+                    <label style="font-size:13px;font-weight:600;">Data:
+                        <input type="date" id="man-date" value="${today}" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                    </label>
+                    <div style="display:flex;gap:10px;">
+                        <label style="flex:1;font-size:13px;font-weight:600;">Inici (HH:MM):
+                            <input type="time" id="man-start" value="08:00" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                        </label>
+                        <label style="flex:1;font-size:13px;font-weight:600;">Final (HH:MM):
+                            <input type="time" id="man-end" value="18:00" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:10px;">
+                        <label style="flex:1;font-size:13px;font-weight:600;">Hores Treballades:
+                            <input type="number" step="0.1" id="man-worked" value="9.5" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                        </label>
+                        <label style="flex:1;font-size:13px;font-weight:600;">Hores Extra Reals:
+                            <input type="number" step="0.1" id="man-extra" value="0.5" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                        </label>
+                    </div>
+                    <label style="font-size:13px;font-weight:600;">Observacions / Feina:
+                        <input type="text" id="man-obs" placeholder="Ex: Feina client XYZ" style="width:100%;padding:8px;border-radius:8px;border:1px solid #ccc;margin-top:4px;" />
+                    </label>
+                </div>
+
+                <div class="modal-buttons" style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="btn btn-secondary" id="btn-cancel-man">Cancel·lar</button>
+                    <button class="btn btn-start" id="btn-save-man">💾 Desar Jornada</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('#btn-cancel-man').onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+        modal.querySelector('#btn-save-man').onclick = async () => {
+            const dateVal = modal.querySelector('#man-date').value;
+            const startVal = modal.querySelector('#man-start').value;
+            const endVal = modal.querySelector('#man-end').value;
+            const workedVal = parseFloat(modal.querySelector('#man-worked').value) || 0;
+            const extraVal = parseFloat(modal.querySelector('#man-extra').value) || 0;
+            const obsVal = modal.querySelector('#man-obs').value.trim();
+
+            if (!dateVal) {
+                alert('La data és obligatòria');
+                return;
+            }
+
+            const startTime = new Date(`${dateVal}T${startVal || '08:00'}:00`);
+            const endTime = new Date(`${dateVal}T${endVal || '17:00'}:00`);
+            const remExtra = Math.floor((extraVal + 0.0001) / 0.5) * 0.5;
+
+            await window.beta10DB.recordJornada({
+                user: 'usuari',
+                date: dateVal,
+                startTime,
+                endTime,
+                type: 'JORNADA',
+                dayType: 'Manual',
+                standardHours: 9,
+                workedHours: workedVal,
+                extraHours: extraVal,
+                remuneratedExtraHours: remExtra,
+                pauseMinutes: 30,
+                observations: obsVal || '[Jornada afegida manualment]'
+            });
+
+            modal.remove();
+            alert('✅ Jornada desada correctament a la base de dades!');
+            await this.renderActiveTab();
+        };
     }
 
     /**
@@ -622,13 +718,26 @@ class Beta10DBUI {
 
                 <div class="db-actions-box">
                     <h4>Exportació i Còpia de Seguretat</h4>
-                    <p>Descarrega o restaura la teva base de dades <code>.sqlite</code> per a no perdre mai cap registre, jornada ni hores extra encara que reinstal·lis l'aplicació.</p>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+                    <p>Fes una còpia de seguretat o restaura-la per no perdre mai cap jornada ni hora extra encara que canviïs de mòbil o reinstal·lis.</p>
+                    
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px;">
                         <button class="btn btn-start db-download-btn" id="db-download-file-btn" style="flex: 1; min-width: 160px;">
-                            📥 Descarregar Còpia (.sqlite)
+                            📥 Descarregar Fitxer (.sqlite)
                         </button>
+                        <button class="btn db-copy-btn" id="db-copy-base64-btn" style="flex: 1; min-width: 160px; background: #6366f1; color: white;">
+                            📋 Copiar Còpia (Text)
+                        </button>
+                    </div>
+
+                    <h4 style="margin-top: 20px;">Restaurar Dades</h4>
+                    <p>Restaura la teva base de dades a partir d'un fitxer <code>.sqlite</code> o enganxant el text de la còpia:</p>
+
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
                         <button class="btn btn-secondary db-upload-btn" id="db-upload-file-btn" style="flex: 1; min-width: 160px; background: #0284c7; color: white;">
-                            📤 Restaurar Còpia (.sqlite)
+                            📤 Restaurar Fitxer (.sqlite)
+                        </button>
+                        <button class="btn db-restore-text-btn" id="db-restore-text-btn" style="flex: 1; min-width: 160px; background: #059669; color: white;">
+                            📋 Restaurar des de Text
                         </button>
                         <input type="file" id="db-file-input" accept=".sqlite,.db" style="display: none;" />
                     </div>
@@ -640,14 +749,52 @@ class Beta10DBUI {
         if (downloadBtn) {
             downloadBtn.onclick = async () => {
                 downloadBtn.disabled = true;
-                downloadBtn.textContent = 'Generant fitxer...';
+                downloadBtn.textContent = 'Preparant...';
                 try {
-                    await window.beta10DB.downloadDatabaseFile();
+                    const res = await window.beta10DB.downloadDatabaseFile();
+                    if (res && res.method === 'share') {
+                        // Obert menú natiu de compartir / desar d'Android
+                    } else {
+                        alert('✅ Còpia de seguretat .sqlite preparada per a la descàrrega!');
+                    }
                 } catch (e) {
                     alert('Error en descarregar: ' + e.message);
                 } finally {
                     downloadBtn.disabled = false;
-                    downloadBtn.textContent = '📥 Descarregar Còpia (.sqlite)';
+                    downloadBtn.textContent = '📥 Descarregar Fitxer (.sqlite)';
+                }
+            };
+        }
+
+        const copyBase64Btn = container.querySelector('#db-copy-base64-btn');
+        if (copyBase64Btn) {
+            copyBase64Btn.onclick = async () => {
+                try {
+                    const b64 = await window.beta10DB.exportDatabaseAsBase64();
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(b64);
+                        alert('✅ Còpia de seguretat copiada al portapapers en text! Pots enganxar-la a WhatsApp, Bloc de notes o correu per a guardar-la.');
+                    } else {
+                        prompt('Copia aquest text per desar la teva còpia de seguretat:', b64);
+                    }
+                } catch (e) {
+                    alert('Error en copiar: ' + e.message);
+                }
+            };
+        }
+
+        const restoreTextBtn = container.querySelector('#db-restore-text-btn');
+        if (restoreTextBtn) {
+            restoreTextBtn.onclick = async () => {
+                const text = prompt('Enganxa aquí el text de la còpia de seguretat (Base64) que vas copiar anteriorment:');
+                if (!text || !text.trim()) return;
+
+                try {
+                    await window.beta10DB.importDatabaseFromBase64(text);
+                    alert('✅ Base de dades restaurada correctament des del text! Totes les jornades i hores extra s\'han recuperat.');
+                    await this.renderActiveTab();
+                } catch (e) {
+                    alert('❌ Error restaurant des de text: ' + e.message);
                 }
             };
         }
@@ -676,7 +823,7 @@ class Beta10DBUI {
                     alert('❌ Error restaurant la còpia: ' + err.message);
                 } finally {
                     uploadBtn.disabled = false;
-                    uploadBtn.textContent = '📤 Restaurar Còpia (.sqlite)';
+                    uploadBtn.textContent = '📤 Restaurar Fitxer (.sqlite)';
                     fileInput.value = '';
                 }
             };
