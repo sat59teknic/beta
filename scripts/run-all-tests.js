@@ -29,6 +29,7 @@ async function main() {
     require('./tests/test-fixes-script.js')(runner);
     require('./tests/test-pause-alarms-real.js')(runner);
     require('./tests/test-fixes-platform.js')(runner);
+    require('./tests/test-pause-end-sound.js')(runner);
 
     // Run suites
     await runner.run();

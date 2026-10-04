@@ -218,7 +218,8 @@ const flush = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise(r
 const HOOK = `
     window.__t = {
         calculateExtraHours, loadState, saveState, validateAppState, updateUI, updateTimers,
-        endWorkday, startWorkday, startPause, endPause, handleAction, playPauseAlarm, stopAlarm,
+        endWorkday, startWorkday, startPause, endPause, handleAction, notifyPauseEnd, stopAlarm,
+        showPauseStatusNotification, dismissPauseEndBanner, resetToOutOfWorkday,
         getPendingSync, getStandardWorkDay, getDayTypeName,
         savePendingSync, executePendingSync, getCurrentLocation, flushDbQueue, recordDb, runActions,
         scheduleNotification, cancelScheduledNotification, ensurePauseAlarmScheduled, resumeActivePause,
@@ -370,6 +371,8 @@ function loadDbUi({ beta10DB, clock, confirm, prompt, navigator } = {}) {
  *  - schedule() rechaza si las notificaciones estan desactivadas ("Notifications not enabled");
  *  - una programacion con hora pasada se DESCARTA EN SILENCIO (el plugin solo hace Logger.error);
  *  - mismo id => reemplaza la anterior (nunca hay duplicados);
+ *  - sin `schedule` => se muestra AL INSTANTE (lista `delivered`) y dispara localNotificationReceived;
+ *  - cancel / removeDeliveredNotifications quitan tambien las ya mostradas;
  *  - checkExactNotificationSetting / changeExactNotificationSetting (Android 12+).
  */
 function createLocalNotificationsMock(clock, opts = {}) {
@@ -378,7 +381,7 @@ function createLocalNotificationsMock(clock, opts = {}) {
         permissionAfterRequest: opts.permissionAfterRequest || null,
         exact: opts.exact || 'granted',
         exactAfterChange: opts.exactAfterChange || null,
-        scheduled: [], dropped: [], channels: [], deleted: [], actionTypes: [], removedDelivered: [],
+        scheduled: [], dropped: [], delivered: [], posted: [], channels: [], deleted: [], actionTypes: [], removedDelivered: [],
         scheduleCalls: 0, requestCalls: 0, exactChangeCalls: 0, cancelCalls: 0, listeners: {}
     };
     const plugin = {
@@ -396,8 +399,17 @@ function createLocalNotificationsMock(clock, opts = {}) {
             st.scheduleCalls++;
             if (st.permission !== 'granted') throw new Error('Notifications not enabled on this device');
             for (const n of notifications) {
-                const atMs = new Date(n.schedule.at).getTime();
+                // El plugin real quita la visible y cancela el temporizador del mismo id antes de publicar
                 st.scheduled = st.scheduled.filter(x => x.id !== n.id);
+                st.delivered = st.delivered.filter(x => x.id !== n.id);
+                if (opts.beforeSchedule) await opts.beforeSchedule(n);
+                if (!n.schedule) {
+                    st.delivered.push({ ...n });
+                    st.posted.push({ ...n });
+                    setImmediate(() => st.emit('localNotificationReceived', { ...n }));
+                    continue;
+                }
+                const atMs = new Date(n.schedule.at).getTime();
                 if (atMs < clock.now) { st.dropped.push(n); continue; }
                 st.scheduled.push({ ...n, atMs });
             }
@@ -408,9 +420,15 @@ function createLocalNotificationsMock(clock, opts = {}) {
             st.cancelCalls++;
             const ids = notifications.map(n => n.id);
             st.scheduled = st.scheduled.filter(n => !ids.includes(n.id));
+            st.delivered = st.delivered.filter(n => !ids.includes(n.id));
             return {};
         },
-        removeDeliveredNotifications: async ({ notifications }) => { st.removedDelivered.push(...notifications.map(n => n.id)); return {}; },
+        removeDeliveredNotifications: async ({ notifications }) => {
+            const ids = notifications.map(n => n.id);
+            st.removedDelivered.push(...ids);
+            st.delivered = st.delivered.filter(n => !ids.includes(n.id));
+            return {};
+        },
         createChannel: async (c) => { st.channels.push(c); return {}; },
         deleteChannel: async ({ id }) => { st.deleted.push(id); return {}; },
         listChannels: async () => ({ channels: st.channels.map(c => ({ ...c, importance: opts.channelImportance !== undefined ? opts.channelImportance : c.importance })) }),
@@ -421,9 +439,33 @@ function createLocalNotificationsMock(clock, opts = {}) {
             if (st.exactAfterChange) st.exact = st.exactAfterChange;
             return { exact_alarm: st.exact };
         },
-        addListener: (event, fn) => { (st.listeners[event] = st.listeners[event] || []).push(fn); return Promise.resolve({ remove() {} }); }
+        addListener: (event, fn) => {
+            (st.listeners[event] = st.listeners[event] || []).push(fn);
+            // El plugin RETIENE la accion pulsada con la app cerrada y la entrega al primer listener
+            if (event === 'localNotificationActionPerformed' && opts.retainedAction) {
+                const data = opts.retainedAction;
+                setImmediate(() => fn(data));
+            }
+            return Promise.resolve({ remove() {} });
+        }
     };
     st.emit = (event, data) => (st.listeners[event] || []).forEach(fn => fn(data));
+    // Simula que la alarma de AlarmManager vence: pasa de programada a mostrada y avisa a la app viva
+    st.fire = (id) => {
+        const n = st.scheduled.find(x => x.id === id);
+        if (!n) return false;
+        st.scheduled = st.scheduled.filter(x => x.id !== id);
+        st.delivered = st.delivered.filter(x => x.id !== id);
+        st.delivered.push(n);
+        st.emit('localNotificationReceived', { ...n });
+        return true;
+    };
+    // Simula tocar la notificacion (o un boton): el plugin la QUITA de la bandeja y emite la accion
+    st.tap = (id, actionId = 'tap') => {
+        const n = st.delivered.find(x => x.id === id) || { id };
+        st.delivered = st.delivered.filter(x => x.id !== id);
+        st.emit('localNotificationActionPerformed', { actionId, notification: n });
+    };
     return { plugin, state: st };
 }
 

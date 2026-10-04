@@ -2286,14 +2286,15 @@ textarea:focus-visible {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(185, 28, 28, 0.98));
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.95), rgba(217, 119, 6, 0.98));
     color: #ffffff;
-    border: 2px solid #fecaca;
+    border: 2px solid #fde68a;
     border-radius: 14px;
     padding: 12px 16px;
     margin: 12px 0 16px 0;
-    box-shadow: 0 0 24px rgba(239, 68, 68, 0.6), 0 4px 12px rgba(0, 0, 0, 0.3);
-    animation: alarmBannerPulse 1.2s infinite alternate ease-in-out;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+    /* Avís de fi de pausa: crida l'atenció un moment, però no "sona" com l'antiga alarma */
+    animation: alarmBannerPulse 0.6s 3 alternate ease-in-out;
     z-index: 100;
 }
 
@@ -2317,7 +2318,7 @@ textarea:focus-visible {
 
 .alarm-banner-icon {
     font-size: 26px;
-    animation: alarmIconRing 0.6s infinite alternate ease-in-out;
+    animation: alarmIconRing 0.3s 6 alternate ease-in-out;
 }
 
 @keyframes alarmIconRing {

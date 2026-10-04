@@ -177,23 +177,42 @@ This application is production-ready and designed for enterprise use with multip
   `@capacitor/filesystem` y `@capacitor/share` se usa el menú de compartir; si no, la app NO simula éxito y ofrece la
   copia en texto (Base64). Los plugins no se han añadido a `package.json` (decisión pendiente del usuario).
 
-## Alarmas y notificaciones de pausa
+## Avisos y notificaciones de pausa
 
-- **APK**: `LocalNotifications.schedule` con id fijo 1001 (reemplaza, nunca duplica), `allowWhileIdle: true`,
-  canal `pause_alarm_channel_v4` (importancia máxima, `alarm.wav` en `res/raw`, vibración, visible en bloqueo), icono
-  monocromo `ic_stat_pause_alarm` (lo crea `scripts/prepare-android.js`). Tras programar se verifica con `getPending`.
-  Se pide POST_NOTIFICATIONS (Android 13+) y, si Android 12+ no permite alarmas exactas, se ofrece abrir Ajustes
-  (una vez) y cada pausa muestra un aviso. Todo fallo de programación se muestra al usuario (caja roja), no solo en el registro.
-- Al reabrir la app con una pausa en curso se reprograma con el tiempo RESTANTE y se comprueba de nuevo al volver al
-  primer plano; si el límite ya pasó se muestra un aviso sin sonido retroactivo. Tras un reinicio del móvil el
-  plugin restaura las notificaciones guardadas (RECEIVE_BOOT_COMPLETED).
+Ya NO hay alarma en bucle (se eliminó `alarm.wav`, el banner "Aturar alarma" y la acción `STOP_ALARM`). Modelo actual:
+
+- **APK, notificación 1002 "En pausa"**: se publica al iniciar la pausa (sin `schedule` => inmediata), `ongoing: true`,
+  `autoCancel: false`, canal `pause_status_channel_v1` (importancia 2: en la bandeja, sin sonido). Lleva el botón
+  `END_PAUSE` "Finalitzar pausa" (action type `PAUSE_ACTIONS`), que abre la app y llama a `endPause()` (mismo flujo
+  que el botón de la app: fichajes P/J, SQLite, cola offline). Tocar el cuerpo la quita (lo hace el plugin) y la app
+  la vuelve a publicar. Se re-publica al reabrir/volver al primer plano (Android 14+ deja deslizarla). Cuando vence
+  el tiempo su texto pasa a "Temps esgotat".
+- **APK, notificación 1001 "Pausa acabada"**: programada a inicio + límite con `allowWhileIdle`, canal
+  `pause_end_channel_v1` (importancia 4, `pause_end.wav` = CLINK CLINK CLINK ~1,25 s, `USAGE_NOTIFICATION`). Suena UNA
+  vez; no hay que pararla. Se verifica con `getPending`. Si el temporizador de la app llega antes (alarma inexacta),
+  se publica la 1001 al instante (mismo id: cancela la programada) => un solo sonido. Con el aviso nativo programado
+  la app NO reproduce audio propio (`pauseEndNativeOk`); sin permiso / canal silenciado sí reproduce `pause_end.wav`
+  una vez.
+- `notifyPauseEnd()` avisa UNA vez por pausa (`pauseAlarmTriggered`); el banner es informativo ("Entesos" solo lo
+  cierra). La pausa nunca se cierra sola salvo la autocorrección de >1 h (M6).
+- `pauseEndInFlight`: `endPause()` no se ejecuta dos veces a la vez (botón + notificación) y ninguna re-publicación
+  concurrente (vuelta a primer plano, arranque en frío por END_PAUSE retenido) deja notificaciones huérfanas.
+  `stopAlarm()` = limpieza completa (cancel + removeDelivered de 1001 y 1002); se llama en todos los caminos donde
+  la pausa deja de existir (endPause, fin de jornada, autocorrecciones, `resetToOutOfWorkday`).
+- `localNotificationReceived` también llega al publicar la 1002: solo la 1001 cuenta como fin de pausa.
+- Se pide POST_NOTIFICATIONS (Android 13+) y, si Android 12+ no permite alarmas exactas, se ofrece abrir Ajustes
+  (una vez) y cada pausa muestra un aviso. Todo fallo de programación se muestra al usuario (caja roja).
+- Al reabrir con una pausa en curso: persistente re-publicada y 1001 reprogramada con el tiempo RESTANTE; si el
+  límite ya pasó, aviso visual sin sonido retroactivo. Tras reiniciar el móvil el plugin restaura las notificaciones
+  guardadas (RECEIVE_BOOT_COMPLETED).
+- `pause_end.wav` lo genera `scripts/generate-pause-sound.js` (determinista; el .wav se commitea).
 - `isAlarmPlaying`, `wakeLock`, `wakeLockLost` y `alarmSource` NO se persisten (un valor obsoleto silenciaba todas
   las alarmas siguientes).
 - Los canales de Android son inmutables: si hay que cambiar sonido/importancia hay que subir el id del canal
-  (`NATIVE_ALARM_CHANNEL_ID`) y añadir el anterior a `LEGACY_ALARM_CHANNEL_IDS`.
+  (`NATIVE_PAUSE_END_CHANNEL_ID` / `NATIVE_PAUSE_STATUS_CHANNEL_ID`) y añadir el anterior a `LEGACY_ALARM_CHANNEL_IDS`.
 - **Web/PWA - limitaciones de plataforma (no corregibles)**: el temporizador del service worker y el de la página
-  mueren si el navegador los suspende (pantalla apagada, pestaña en segundo plano, SW detenido). La alarma web solo
-  es fiable con la app abierta; la fiable es la del APK. Doze/ahorro de batería de algunos fabricantes (Xiaomi,
+  mueren si el navegador los suspende (pantalla apagada, pestaña en segundo plano, SW detenido). El aviso web solo
+  es fiable con la app abierta y no tiene notificación persistente con botón; el fiable es el del APK. Doze/ahorro de batería de algunos fabricantes (Xiaomi,
   Huawei, Samsung...) puede retrasar o matar la app: excluir la app de la optimización de batería.
 - Servicio de la PWA: `service-worker.js` usa red primero para HTML/JS/CSS (evita scripts viejos) y caché primero para
   audio/wasm/iconos. Subir `CACHE_NAME` al cambiar la lista de ficheros.
@@ -201,8 +220,8 @@ This application is production-ready and designed for enterprise use with multip
 ## Build Android
 
 1. `npm run build` (copia los estáticos a `www/`), `npx cap add android` / `npx cap sync android`.
-2. `node scripts/prepare-android.js` (idempotente): permisos, `alarm.wav` -> `res/raw`, icono de notificación, firma
-   debug y release con `debug.keystore`, sin tráfico en claro. **Falla** si falta `debug.keystore`, `alarm.wav`, el
+2. `node scripts/prepare-android.js` (idempotente): permisos, `pause_end.wav` -> `res/raw` (borra el `alarm.wav` antiguo), icono de notificación, firma
+   debug y release con `debug.keystore`, sin tráfico en claro. **Falla** si falta `debug.keystore`, `pause_end.wav`, el
    manifest o el gradle.
 3. Aviso: `debug.keystore` está en el repositorio (contraseña pública `android`) y también firma release.
    Es lo que mantiene la firma entre actualizaciones, pero cualquiera con el repo puede firmar un APK con esa clave.
@@ -212,4 +231,5 @@ This application is production-ready and designed for enterprise use with multip
 `npm test` en `beta/` (sin red; fetch, IndexedDB, Capacitor, GPS y service worker simulados). Los tests de script.js,
 db-ui.js y el service worker ejecutan el **código real** en `vm` (`scripts/test-fake-app.js`). Los tests antiguos
 `test-alarm-and-notifications.js`, `test-pause-and-resilience.js` y similares prueban réplicas con mocks del arnés;
-la cobertura real de alarmas está en `test-pause-alarms-real.js`.
+la cobertura real de las notificaciones de pausa está en `test-pause-alarms-real.js` (y el sonido en
+`test-pause-end-sound.js`).

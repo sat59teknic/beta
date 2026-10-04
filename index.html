@@ -73,17 +73,17 @@
                 </div>
             </div>
             
-            <!-- Banner d'Alarma Activa amb Botó per Aturar el Timbre -->
+            <!-- Banner informatiu de fi de pausa (no és una alarma: es tanca amb "Entesos") -->
             <div id="alarm-banner" class="alarm-banner" style="display: none;">
                 <div class="alarm-banner-content">
-                    <span class="alarm-banner-icon">🚨</span>
+                    <span class="alarm-banner-icon">⏰</span>
                     <div class="alarm-banner-text">
                         <strong>TEMPS DE PAUSA COMPLETAT!</strong>
-                        <span id="alarm-banner-sub">L'alarma està sonant</span>
+                        <span id="alarm-banner-sub">Recorda finalitzar la pausa.</span>
                     </div>
                 </div>
                 <button id="btn-stop-alarm-banner" class="btn-stop-alarm" type="button">
-                    🔕 Aturar Alarma
+                    ✔️ Entesos
                 </button>
             </div>
 
@@ -118,7 +118,7 @@
         Bateria baixa (<span id="battery-level"></span>%) - Connecta el carregador
     </div>
 
-    <!-- Audio player per a fons / alarma persistent -->
+    <!-- Audio player: keep-alive silenciós durant la pausa i so curt de fi de pausa -->
     <audio id="pause-audio-player" preload="auto" playsinline style="display:none;"></audio>
 </body>
 </html>

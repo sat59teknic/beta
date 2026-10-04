@@ -472,7 +472,7 @@ module.exports = function registerFixesScriptTests(runner) {
             nat.ln.release('granted');
             await app.t.initPromise;
             assertEqual(settled, true);
-            assertEqual(nat.ln.channels.length, 1, 'canal creado tras conceder el permiso');
+            assertEqual(nat.ln.channels.length, 2, 'canales (pausa en curso + fin de pausa) creados tras conceder el permiso');
         });
 
         suite.test('M10 permiso denegado: aviso visible (clase alert) y la app sigue funcionando', async () => {

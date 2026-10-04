@@ -395,11 +395,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 id="btn-pause-esmorzar" 
                                 ${breakfastDone ? 'disabled' : ''}>
                             🥐 Esmorzar
-                            <small>${breakfastDone ? '🔒 Ja realitzat avui (només disponible Dinar)' : '15 minuts (avís d\'alarma en acabar)'}</small>
+                            <small>${breakfastDone ? '🔒 Ja realitzat avui (només disponible Dinar)' : '15 minuts (avís curt en acabar)'}</small>
                         </button>
                         <button class="btn btn-secondary pause-type-btn" id="btn-pause-dinar">
                             🍽️ Dinar
-                            <small>30 minuts (avís d'alarma en acabar)</small>
+                            <small>30 minuts (avís curt en acabar)</small>
                         </button>
                     </div>
                     <div class="modal-buttons">
@@ -1228,14 +1228,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 1. Mantenir pantalla activa durant la pausa
             await requestWakeLock();
 
-            // 2. Iniciar àudio keep-alive en segon pla (permet que l'alarma soni amb pantalla bloquejada)
+            // 2. Iniciar àudio keep-alive en segon pla i el temporitzador de sessió de fi de pausa
             const pauseLimit = PAUSE_LIMITS[pauseType];
             const remaining = Math.max(1000, pauseLimit - (Date.now() - pauseStartedAt.getTime()));
             startBackgroundAudioKeepAlive(pauseType, remaining);
 
-            // 3. Programar notificació del sistema (i comprovar que realment queda programada)
+            // 3. Programar l'avís de fi de pausa (i comprovar que realment queda programat) i
+            //    mostrar la notificació persistent "En pausa" amb el botó "Finalitzar pausa"
             if (!isNativeApp) await requestNotificationPermission();
             const scheduled = await scheduleNotification(pauseType, remaining);
+            if (isNativeApp) await showPauseStatusNotification();
 
             // 4. Mostrar instruccions a l'usuari (15 min o 30 min)
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
@@ -1246,8 +1248,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             logActivity(`🍽️ Pausa iniciada: ${pauseType} (${timeText})`);
             logActivity(scheduled.ok
-                ? `🔔 Alarma programada per a ${timeText} (activa amb pantalla bloquejada)`
-                : `⚠️ Alarma en segon pla NO garantida: ${scheduled.reason || 'motiu desconegut'}`);
+                ? `🔔 Avís de fi de pausa programat per a ${timeText} (actiu amb pantalla bloquejada)`
+                : `⚠️ Avís de fi de pausa en segon pla NO garantit: ${scheduled.reason || 'motiu desconegut'}`);
 
         } catch (error) {
             logActivity(`❌ Error iniciant pausa: ${error.message}`);
@@ -1257,12 +1259,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function buildPauseInfoMessage(pauseType, timeText, scheduled) {
         let text = isNativeApp
-            ? `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonarà en segon pla o pantalla apagada.`
-            : `⏰ Pausa ${pauseType} iniciada (${timeText}). L'alarma sonora sonarà automàticament.`;
+            ? `⏰ Pausa ${pauseType} iniciada (${timeText}). La tens a les notificacions (pots finalitzar-la des d'allà); en acabar el temps sonarà un avís curt.`
+            : `⏰ Pausa ${pauseType} iniciada (${timeText}). En acabar el temps sonarà un avís curt.`;
         let isWarning = false;
         if (!scheduled || !scheduled.ok) {
             isWarning = true;
-            text = `⚠️ Pausa ${pauseType} iniciada (${timeText}), però NO s'ha pogut programar l'alarma en segon pla`
+            text = `⚠️ Pausa ${pauseType} iniciada (${timeText}), però NO s'ha pogut programar l'avís en segon pla`
                 + ` (${describeScheduleFailure(scheduled && scheduled.reason)}). Mantingues l'app oberta amb la pantalla encesa.`;
         } else if (scheduled.exactDenied) {
             isWarning = true;
@@ -1270,7 +1272,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (!isWarning && !isNativeApp && notificationStatus.permission === 'denied') {
             isWarning = true;
-            text += ' ⚠️ Notificacions denegades: l\'alarma només sonarà amb aquesta pestanya oberta.';
+            text += ' ⚠️ Notificacions denegades: l\'avís només sonarà amb aquesta pestanya oberta.';
         }
         return { text, isWarning };
     }
@@ -1291,15 +1293,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function endPause() {
-        // 1. Aturar alarma, cancel·lar notificacions i alliberar recursos
-        stopAlarm();
-        stopAlarmAudio();
-        await cancelScheduledNotification();
-        await releaseWakeLock();
-
+        // Un sol tancament alhora (botó de l'app i botó "Finalitzar pausa" de la notificació). El
+        // flag es posa de manera síncrona: les re-publicacions concurrents de notificacions el respecten.
+        if (pauseEndInFlight) return;
         if (appState.currentState !== 'PAUSA') {
+            stopAlarm();
+            await releaseWakeLock();
             return;
         }
+        pauseEndInFlight = true;
+        try {
+            await endPauseInner();
+        } finally {
+            pauseEndInFlight = false;
+        }
+    }
+
+    async function endPauseInner() {
+        // 1. Treure avisos i notificacions de pausa i alliberar recursos
+        stopAlarm();
+        await cancelScheduledNotification();
+        await releaseWakeLock();
         clearInfoMessage();
 
         // 2. DETENIR EL TEMPS DE PAUSA EXACTE EN AQUEST INSTANT
@@ -1338,6 +1352,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         saveState();
         updateUI();
+        // Una re-publicació que hagués arribat al plugin just abans del canvi d'estat no queda òrfena
+        cancelScheduledNotification();
 
         logActivity(`⏱️ Temps de pausa aturat: ${Math.round(pauseMinutes)} minuts computats.`);
 
@@ -1478,24 +1494,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- SISTEMA DE NOTIFICACIONES, ALARMA Y WAKE LOCK ---
     //
-    // Arquitectura de l'alarma de pausa (vegeu també CLAUDE.md > "Alarmes de pausa"):
-    //  - APK (Capacitor): LocalNotifications programa una alarma d'Android (AlarmManager,
-    //    setExactAndAllowWhileIdle) que mostra la notificació amb so pel canal d'alta
-    //    importància encara que l'app estigui en segon pla o la pantalla bloquejada. Si l'app
-    //    està viva, l'esdeveniment `localNotificationReceived` fa sonar l'alarma en bucle.
-    //  - Web/PWA: un setTimeout a la pàgina + un altre al service worker. Les PWA no poden
-    //    garantir res amb el navegador tancat o el SW aturat pel sistema (limitació de la plataforma).
-    const NATIVE_ALARM_CHANNEL_ID = 'pause_alarm_channel_v4';
-    // Els canals d'Android són immutables un cop creats: si una versió anterior de l'APK els
-    // va crear sense el so (alarm.wav encara no era a res/raw) o l'usuari els va silenciar, la
-    // única manera de recuperar-los és crear-ne un d'id nou i esborrar els vells.
-    const LEGACY_ALARM_CHANNEL_IDS = ['pause_alarm_channel', 'pause_alarm_channel_v2', 'pause_alarm_channel_v3'];
-    const NATIVE_ALARM_NOTIFICATION_ID = 1001;
+    // Arquitectura de l'avís de pausa (vegeu també CLAUDE.md > "Avisos i notificacions de pausa"):
+    //  - APK (Capacitor), dues notificacions:
+    //     · 1002 "En pausa": es publica en iniciar la pausa, persistent (ongoing) i silenciosa (canal
+    //       LOW) a la safata d'Android, amb el botó "Finalitzar pausa" (END_PAUSE) que tanca la pausa.
+    //     · 1001 "Pausa acabada": programada amb AlarmManager (allowWhileIdle) a inici + límit; sona
+    //       UNA vegada amb pause_end.wav (CLINK CLINK CLINK) pel canal HIGH. No és una alarma en bucle.
+    //  - Web/PWA: setTimeout a la pàgina + un altre al service worker; en acabar sona pause_end.wav una
+    //    vegada. Les PWA no poden garantir res amb el navegador tancat (limitació de la plataforma).
+    const NATIVE_PAUSE_END_CHANNEL_ID = 'pause_end_channel_v1';
+    const NATIVE_PAUSE_STATUS_CHANNEL_ID = 'pause_status_channel_v1';
+    // Els canals d'Android són immutables un cop creats: per canviar so/importància cal un id nou i
+    // esborrar els vells. v1..v4 eren els de l'antiga alarma en bucle (so en bucle, importància MAX).
+    const LEGACY_ALARM_CHANNEL_IDS = ['pause_alarm_channel', 'pause_alarm_channel_v2', 'pause_alarm_channel_v3', 'pause_alarm_channel_v4'];
+    const NATIVE_ALARM_NOTIFICATION_ID = 1001;        // "Pausa acabada" (programada)
+    const NATIVE_PAUSE_STATUS_NOTIFICATION_ID = 1002; // "En pausa" (persistent)
+    const PAUSE_ACTION_TYPE_ID = 'PAUSE_ACTIONS';
+    const END_PAUSE_ACTION_ID = 'END_PAUSE';
+    const PAUSE_END_SOUND = 'pause_end.wav';
     const NATIVE_SMALL_ICON = 'ic_stat_pause_alarm'; // drawable monocrom creat per scripts/prepare-android.js (L12)
     const EXACT_ALARM_PROMPTED_KEY = 'beta10_exact_alarm_prompted';
     const notificationStatus = { permission: 'unknown', exactAlarm: 'unknown', channelSilenced: false };
     let backgroundAlarmTimer = null;
     let nativeListenersRegistered = false;
+    // Hi ha un tancament de pausa en curs (botó de l'app o END_PAUSE de la notificació): evita un
+    // doble tancament i que una re-publicació concurrent (tornada a primer pla) deixi notificacions òrfenes.
+    let pauseEndInFlight = false;
+    // L'avís natiu de fi de pausa ha quedat programat en aquesta sessió: a l'APK, si és així, el so el
+    // fa el canal d'Android i l'app NO en reprodueix cap altre (mai doble so).
+    let pauseEndNativeOk = false;
 
     function getAudioPlayer() {
         return document.getElementById('pause-audio-player');
@@ -1505,10 +1532,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         return isNativeApp ? (window.Capacitor?.Plugins?.LocalNotifications || null) : null;
     }
 
+    function isPauseActive() {
+        return appState.currentState === 'PAUSA' && !!appState.currentPauseStart && !!appState.currentPauseType && !pauseEndInFlight;
+    }
+
     // Iniciar reproducció silenciosa (Keep-Alive) durant la pausa
     // Això manté actiu el procés web d'Android/iOS evitant que el navegador suspengui l'àudio quan s'apaga la pantalla.
-    // `remainingMs`: temps que falta fins a l'alarma (abans sempre s'armava el límit complet, també en
-    // reobrir l'app a mitja pausa, i la segona alarma sonava tard o duplicada).
+    // `remainingMs`: temps que falta fins al final de la pausa (no el límit complet en reobrir l'app).
     function startBackgroundAudioKeepAlive(pauseType, remainingMs = null) {
         try {
             const player = getAudioPlayer();
@@ -1540,39 +1570,39 @@ document.addEventListener('DOMContentLoaded', async () => {
                 backgroundAlarmTimer = null;
                 if (appState.currentState === 'PAUSA') {
                     logActivity(`⏰ Temporitzador de pausa finalitzat (${pauseType})`);
-                    playPauseAlarm(pauseType, 'background-timer');
+                    notifyPauseEnd(pauseType, 'background-timer');
                 }
             }, Math.max(0, delay));
         }
     }
 
-    // Reproduir el so d'alarma fort en bucle a través de l'element d'àudio
-    function playAlarmAudio(pauseType) {
+    // So curt de fi de pausa (CLINK CLINK CLINK) UNA vegada, sense bucle
+    function playPauseEndSound() {
         try {
             const player = getAudioPlayer();
             if (!player) {
                 createBeepSound('strong');
                 return;
             }
-            player.src = 'alarm.wav';
-            player.loop = true;
+            player.src = PAUSE_END_SOUND;
+            player.loop = false;
             player.volume = 1.0;
             const playing = player.play();
             if (playing && typeof playing.then === 'function') {
                 playing.then(() => {
-                    logActivity('🔊 So d\'alarma fort activat');
+                    logActivity('🔔 So de fi de pausa reproduït');
                 }).catch(e => {
-                    console.warn('⚠️ Error reproduint alarm.wav:', e);
+                    console.warn(`⚠️ Error reproduint ${PAUSE_END_SOUND}:`, e);
                     createBeepSound('strong');
                 });
             }
         } catch (e) {
-            console.warn('⚠️ Error en playAlarmAudio:', e);
+            console.warn('⚠️ Error en playPauseEndSound:', e);
             createBeepSound('strong');
         }
     }
 
-    // Aturar qualsevol àudio d'alarma i temporitzador
+    // Aturar qualsevol àudio de pausa i temporitzador
     function stopAlarmAudio() {
         if (backgroundAlarmTimer) {
             clearTimeout(backgroundAlarmTimer);
@@ -1590,7 +1620,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Canal de notificacions per a Android amb màxima prioritat i so propi d'alarma
+    // Canals d'Android: "Pausa en curs" (silenciós) i "Fi de pausa" (so curt pause_end.wav)
     async function initNativeNotificationChannel() {
         const LocalNotifications = getLocalNotificationsPlugin();
         if (!LocalNotifications) return;
@@ -1601,28 +1631,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             await LocalNotifications.createChannel({
-                id: NATIVE_ALARM_CHANNEL_ID,
-                name: 'Alarmes de Pausa',
-                description: 'Notificacions i alarma sonora de finalització de pausa laboral',
-                importance: 5, // MAX: sona, vibra i apareix a pantalla bloquejada / heads-up
-                visibility: 1, // Visible a la pantalla de bloqueig
-                sound: 'alarm.wav',
-                vibration: true,
-                lights: true,
-                lightColor: '#E74C3C'
+                id: NATIVE_PAUSE_STATUS_CHANNEL_ID,
+                name: 'Pausa en curs',
+                description: 'Indica que estàs en pausa i permet finalitzar-la des de la barra de notificacions',
+                importance: 2, // LOW: a la safata, sense so ni finestra emergent
+                visibility: 1,
+                vibration: false,
+                lights: false
             });
 
-            // Registrar botó d'acció a la notificació d'Android per aturar el timbre directament
+            await LocalNotifications.createChannel({
+                id: NATIVE_PAUSE_END_CHANNEL_ID,
+                name: 'Fi de pausa',
+                description: 'Avís curt (clink clink clink) quan s\'acaba el temps de pausa',
+                importance: 4, // HIGH: sona i apareix a dalt de la pantalla una vegada
+                visibility: 1,
+                sound: PAUSE_END_SOUND,
+                vibration: true,
+                lights: true,
+                lightColor: '#F39C12'
+            });
+
+            // Botó "Finalitzar pausa" a les dues notificacions
             try {
                 await LocalNotifications.registerActionTypes({
                     types: [
                         {
-                            id: 'PAUSE_ALARM_ACTIONS',
+                            id: PAUSE_ACTION_TYPE_ID,
                             actions: [
                                 {
-                                    id: 'STOP_ALARM',
-                                    title: '🔕 Aturar Alarma',
-                                    destructive: true
+                                    id: END_PAUSE_ACTION_ID,
+                                    title: '⏹️ Finalitzar pausa'
                                 }
                             ]
                         }
@@ -1632,21 +1671,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.warn('⚠️ No s\'han pogut registrar tipus d\'acció:', actErr);
             }
 
-            // Comprovar que l'usuari no ha silenciat el canal des de la configuració d'Android
+            // Comprovar que l'usuari no ha silenciat el canal de fi de pausa des de la configuració d'Android
             try {
                 if (typeof LocalNotifications.listChannels === 'function') {
                     const listed = await LocalNotifications.listChannels();
-                    const channel = (listed?.channels || []).find(c => c.id === NATIVE_ALARM_CHANNEL_ID);
+                    const channel = (listed?.channels || []).find(c => c.id === NATIVE_PAUSE_END_CHANNEL_ID);
                     notificationStatus.channelSilenced = !!(channel && Number(channel.importance) < 3);
                     if (notificationStatus.channelSilenced) {
-                        logActivity('⚠️ El canal "Alarmes de Pausa" està silenciat a la configuració d\'Android: l\'alarma no sonarà.');
+                        logActivity('⚠️ El canal "Fi de pausa" està silenciat a la configuració d\'Android: l\'avís no sonarà.');
                     }
                 }
             } catch (listErr) {
                 console.warn('⚠️ No s\'ha pogut comprovar el canal:', listErr);
             }
 
-            console.log('✅ Canal de notificacions nativa d\'alta prioritat amb so d\'alarma preparat');
+            console.log('✅ Canals de notificació de pausa preparats');
         } catch (err) {
             console.warn('⚠️ No s\'ha pogut crear el canal de notificacions:', err);
         }
@@ -1658,24 +1697,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!LocalNotifications || nativeListenersRegistered) return;
         nativeListenersRegistered = true;
         try {
-            // Quan la notificació es dispara mentre l'app està viva (primer o segon pla)
+            // Quan una notificació es mostra amb l'app viva. La "En pausa" (1002) també arriba aquí en
+            // publicar-se (el plugin crida fireReceived): només la 1001 indica la fi de la pausa.
             Promise.resolve(LocalNotifications.addListener('localNotificationReceived', (notification) => {
-                logActivity(`🔔 Notificació d'alarma rebuda: ${notification?.title || ''}`);
+                if (Number(notification?.id) !== NATIVE_ALARM_NOTIFICATION_ID) return;
+                logActivity(`🔔 Notificació de fi de pausa rebuda: ${notification?.title || ''}`);
                 if (appState.currentState === 'PAUSA') {
-                    playPauseAlarm(appState.currentPauseType || 'pausa', 'native-notification');
+                    notifyPauseEnd(appState.currentPauseType || 'pausa', 'native-notification');
                 }
             })).catch(e => console.warn('⚠️ addListener(localNotificationReceived):', e));
 
-            // Quan l'usuari toca la notificació o un dels seus botons des de la barra d'Android
+            // Quan l'usuari toca la notificació o el botó "Finalitzar pausa". El plugin obre l'app i
+            // TREU la notificació tocada (també la persistent); l'esdeveniment es reté fins que hi ha
+            // listener, de manera que també funciona si l'app estava tancada.
             Promise.resolve(LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction) => {
                 const actionId = notificationAction?.actionId;
-                logActivity(`👆 Notificació d'alarma acció: ${actionId || 'oberta'}`);
-                if (actionId === 'STOP_ALARM') {
-                    stopAlarm();
-                    logActivity('🔕 Alarma detinguda directament des de la notificació');
-                } else if (appState.isAlarmPlaying) {
-                    // Només aturar si ja està sonant
-                    stopAlarm();
+                logActivity(`👆 Notificació de pausa: ${actionId || 'oberta'}`);
+                if (actionId === END_PAUSE_ACTION_ID) {
+                    if (appState.currentState === 'PAUSA' && !pauseEndInFlight) {
+                        logActivity('⏹️ Finalitzant la pausa des de la notificació');
+                        endPause().catch(e => logActivity(`❌ Error finalitzant la pausa: ${e.message}`));
+                    } else {
+                        logActivity('ℹ️ "Finalitzar pausa" ignorat: no hi ha cap pausa en curs');
+                        if (appState.currentState !== 'PAUSA') cancelScheduledNotification();
+                    }
+                } else if (isPauseActive()) {
+                    // Tocar el cos la treu de la safata: es torna a publicar mentre duri la pausa
+                    showPauseStatusNotification().catch(() => {});
                 }
             })).catch(e => console.warn('⚠️ addListener(localNotificationActionPerformed):', e));
 
@@ -1737,7 +1785,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
 
-    // Android 12+: sense "Alarmes i recordatoris" l'alarma NO és exacta (setAndAllowWhileIdle) i
+    // Android 12+: sense "Alarmes i recordatoris" l'avís NO és exacte (setAndAllowWhileIdle) i
     // en Doze pot endarrerir-se molts minuts. Es comprova i, un cop, es porta l'usuari a la configuració.
     async function checkExactAlarmSetting(askUser = false) {
         const LocalNotifications = getLocalNotificationsPlugin();
@@ -1747,12 +1795,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const value = (result && (result.exact_alarm || result.exactAlarm)) || 'unknown';
             notificationStatus.exactAlarm = value;
             if (value === 'denied') {
-                logActivity('⚠️ Alarmes exactes no permeses: l\'alarma de pausa pot endarrerir-se.');
+                logActivity('⚠️ Alarmes exactes no permeses: l\'avís de fi de pausa pot endarrerir-se.');
                 let alreadyAsked = false;
                 try { alreadyAsked = !!localStorage.getItem(EXACT_ALARM_PROMPTED_KEY); } catch (e) {}
                 if (askUser && !alreadyAsked && typeof LocalNotifications.changeExactNotificationSetting === 'function') {
                     try { localStorage.setItem(EXACT_ALARM_PROMPTED_KEY, '1'); } catch (e) {}
-                    if (confirm('Perquè l\'alarma de pausa soni a l\'hora exacta, Android ha de permetre "Alarmes i recordatoris" a aquesta app.\n\nVols obrir la configuració ara?')) {
+                    if (confirm('Perquè l\'avís de fi de pausa arribi a l\'hora exacta, Android ha de permetre "Alarmes i recordatoris" a aquesta app.\n\nVols obrir la configuració ara?')) {
                         const after = await LocalNotifications.changeExactNotificationSetting();
                         const afterValue = (after && (after.exact_alarm || after.exactAlarm)) || 'unknown';
                         notificationStatus.exactAlarm = afterValue;
@@ -1780,10 +1828,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (granted) {
             if (isNativeApp) await checkExactAlarmSetting(true);
             if (notificationStatus.channelSilenced) {
-                showNotificationWarning('🔕 El canal "Alarmes de Pausa" està silenciat a la configuració d\'Android: l\'alarma no sonarà. Activa\'l a Configuració > Aplicacions > 9T Beta10 > Notificacions.');
+                showNotificationWarning('🔕 El canal "Fi de pausa" està silenciat a la configuració d\'Android: l\'avís no sonarà. Activa\'l a Configuració > Aplicacions > 9T Beta10 > Notificacions.');
             }
         } else if (isNativeApp ? !!getLocalNotificationsPlugin() : (typeof Notification !== 'undefined')) {
-            showNotificationWarning('🔕 Notificacions desactivades: l\'alarma de pausa NOMÉS sonarà amb l\'app oberta. Activa-les a la configuració del dispositiu.');
+            showNotificationWarning('🔕 Notificacions desactivades: l\'avís de fi de pausa NOMÉS sonarà amb l\'app oberta. Activa-les a la configuració del dispositiu.');
         }
         return granted;
     }
@@ -1802,7 +1850,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // 🐛 FIX #3: Detectar si se perdió durante una pausa activa
                     if (appState.currentState === 'PAUSA' && !appState.wakeLockLost) {
                         appState.wakeLockLost = true;
-                        logActivity('⚠️ Wake Lock alliberat - L\'alarma nativa en segon pla segueix programada');
+                        logActivity('⚠️ Wake Lock alliberat - L\'avís natiu de fi de pausa segueix programat');
 
                         // Intentar recuperar wake lock después de 1 segundo si sigue en primer plano
                         setTimeout(async () => {
@@ -1861,8 +1909,58 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Programar notificación con AlarmManager nativo (segundo plano real) o Service Worker.
-    // Retorna { ok, reason?, exactDenied? }: ja no se silencia cap fallada (abans només anava al log).
+    function formatClock(date) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Notificació persistent "En pausa" (1002) amb el botó "Finalitzar pausa". Mateix id: mai duplicada.
+    // Si el temps ja s'ha esgotat, el text ho diu (canal LOW: re-publicar-la no fa soroll).
+    async function showPauseStatusNotification() {
+        const LocalNotifications = getLocalNotificationsPlugin();
+        if (!LocalNotifications || notificationStatus.permission !== 'granted' || !isPauseActive()) return false;
+        const pauseType = appState.currentPauseType;
+        const limit = PAUSE_LIMITS[pauseType];
+        if (!limit) return false;
+        const start = new Date(appState.currentPauseStart);
+        const end = new Date(start.getTime() + limit);
+        const overrun = Date.now() >= end.getTime();
+        const title = pauseType === 'esmorçar' ? '☕ En pausa: esmorçar' : `🍽️ En pausa: ${pauseType}`;
+        const body = overrun
+            ? `⚠️ Temps esgotat a les ${formatClock(end)}. Recorda finalitzar la pausa.`
+            : `Des de les ${formatClock(start)} · acaba a les ${formatClock(end)}`;
+        try {
+            await LocalNotifications.schedule({
+                notifications: [
+                    {
+                        id: NATIVE_PAUSE_STATUS_NOTIFICATION_ID,
+                        title,
+                        body,
+                        largeBody: `${body}\nPrem "Finalitzar pausa" per tornar a la jornada (s'obrirà l'app).`,
+                        channelId: NATIVE_PAUSE_STATUS_CHANNEL_ID,
+                        smallIcon: NATIVE_SMALL_ICON,
+                        iconColor: '#F39C12',
+                        ongoing: true,
+                        autoCancel: false,
+                        actionTypeId: PAUSE_ACTION_TYPE_ID,
+                        extra: { kind: 'pause-status', pauseType }
+                    }
+                ]
+            });
+            // La pausa s'ha tancat mentre es publicava: no deixar-la òrfena
+            if (!isPauseActive()) {
+                await cancelScheduledNotification();
+                return false;
+            }
+            return true;
+        } catch (error) {
+            logActivity(`⚠️ No s'ha pogut mostrar la notificació "En pausa": ${error.message}`);
+            return false;
+        }
+    }
+
+    // Programar l'avís de fi de pausa amb AlarmManager nadiu (segon pla real) o Service Worker.
+    // `delayMs` = 0 i APK => es publica a l'instant (temporitzador de l'app arribat abans que l'alarma
+    // inexacta d'Android). Retorna { ok, reason?, exactDenied? }: cap fallada se silencia.
     async function scheduleNotification(pauseType, delayMs) {
         const timeLimit = pauseType === 'esmorçar' ? 15 : 30;
         const targetDate = new Date(Date.now() + delayMs);
@@ -1871,6 +1969,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const LocalNotifications = getLocalNotificationsPlugin();
             if (LocalNotifications) {
+                pauseEndNativeOk = false;
                 // El permís pot haver-se revocat des de l'última vegada
                 const granted = notificationStatus.permission === 'granted'
                     ? (typeof LocalNotifications.checkPermissions === 'function'
@@ -1883,48 +1982,53 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return outcome;
                 }
 
-                // Cancelar alarma nativa previa (mateix id: mai hi ha duplicats)
+                // Cancelar l'avís previ (mateix id: mai hi ha duplicats)
                 try {
                     await LocalNotifications.cancel({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
                 } catch (e) {}
 
-                // Programar con allowWhileIdle: true (activa alarma de Android aunque el móvil esté en reposo/bloqueado)
-                await LocalNotifications.schedule({
-                    notifications: [
-                        {
-                            id: NATIVE_ALARM_NOTIFICATION_ID,
-                            title: '⏰ Temps de pausa completat!',
-                            body: `Has completat els ${timeLimit} minuts de ${pauseType}. Torna a la jornada laboral!`,
-                            schedule: {
-                                at: targetDate,
-                                allowWhileIdle: true
-                            },
-                            channelId: NATIVE_ALARM_CHANNEL_ID,
-                            smallIcon: NATIVE_SMALL_ICON,
-                            iconColor: '#E74C3C',
-                            sound: 'alarm.wav',
-                            actionTypeId: 'PAUSE_ALARM_ACTIONS',
-                            extra: {
-                                pauseType: pauseType
-                            }
-                        }
-                    ]
-                });
+                // La pausa pot haver-se tancat mentre s'esperava (END_PAUSE concurrent)
+                if (!isPauseActive()) {
+                    outcome.reason = 'pause-ended';
+                    return outcome;
+                }
+
+                const immediate = !(delayMs > 0);
+                const notification = {
+                    id: NATIVE_ALARM_NOTIFICATION_ID,
+                    title: '⏰ Pausa acabada',
+                    body: `Han passat els ${timeLimit} minuts de ${pauseType}. Recorda finalitzar la pausa.`,
+                    channelId: NATIVE_PAUSE_END_CHANNEL_ID,
+                    smallIcon: NATIVE_SMALL_ICON,
+                    iconColor: '#F39C12',
+                    sound: PAUSE_END_SOUND,
+                    actionTypeId: PAUSE_ACTION_TYPE_ID,
+                    extra: { kind: 'pause-end', pauseType: pauseType }
+                };
+                // allowWhileIdle: true => sona encara que el mòbil estigui en repòs/bloquejat
+                if (!immediate) notification.schedule = { at: targetDate, allowWhileIdle: true };
+                await LocalNotifications.schedule({ notifications: [notification] });
+
+                if (immediate) {
+                    outcome.ok = true;
+                    pauseEndNativeOk = !notificationStatus.channelSilenced;
+                    return outcome;
+                }
 
                 // El plugin descarta en silenci les programacions amb hora passada; es verifica
                 const pending = await isNativeAlarmPending();
                 if (pending === false) {
                     outcome.reason = 'not-pending';
-                    logActivity('❌ Android no ha deixat l\'alarma de pausa programada');
+                    logActivity('❌ Android no ha deixat programat l\'avís de fi de pausa');
                     return outcome;
                 }
 
                 const exact = await checkExactAlarmSetting(false);
                 outcome.exactDenied = exact === 'denied';
                 outcome.ok = true;
+                pauseEndNativeOk = !notificationStatus.channelSilenced;
 
-                const timeString = targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                logActivity(`🔔 Alarma nativa programada a les ${timeString} (${timeLimit} min) - Funcionarà en segon pla`);
+                logActivity(`🔔 Avís de fi de pausa programat a les ${formatClock(targetDate)} (${timeLimit} min) - Funcionarà en segon pla`);
             } else if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await getServiceWorkerRegistration();
                 const worker = registration && (registration.active || navigator.serviceWorker.controller);
@@ -1948,15 +2052,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (error) {
             outcome.reason = error.message || String(error);
-            logActivity(`❌ Error programando notificació: ${error.message}`);
+            logActivity(`❌ Error programant l'avís de fi de pausa: ${error.message}`);
         }
         return outcome;
     }
 
-    // Reobrir l'app / tornar al primer pla amb una pausa en curs: si l'alarma nativa ja no és
-    // programada (reinici, dades esborrades...) es torna a programar. Mai crea duplicats (mateix id).
+    // Reobrir l'app / tornar al primer pla amb una pausa en curs: es torna a mostrar la notificació
+    // "En pausa" (l'usuari pot haver-la lliscat a Android 14+) i, si l'avís de fi ja no és programat
+    // (reinici, dades esborrades...), es reprograma. Mai crea duplicats (mateixos ids).
     async function ensurePauseAlarmScheduled() {
-        if (appState.currentState !== 'PAUSA' || !appState.currentPauseStart || !appState.currentPauseType) return null;
+        if (!isPauseActive()) return null;
+        if (isNativeApp) await showPauseStatusNotification();
         const limit = PAUSE_LIMITS[appState.currentPauseType];
         if (!limit) return null;
         const remaining = limit - (Date.now() - new Date(appState.currentPauseStart).getTime());
@@ -1965,6 +2071,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const pending = await isNativeAlarmPending();
             if (pending === true) return { ok: true, reason: null, exactDenied: false };
         }
+        if (!isPauseActive()) return null;
         return scheduleNotification(appState.currentPauseType, remaining);
     }
 
@@ -1982,18 +2089,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // Cancelar notificación programada i netejar notificacions actives de la barra
+    // Cancel·lar l'avís programat i treure les notificacions de pausa (1001 i 1002) de la barra.
+    // `cancel` també esborra la 1002 del magatzem del plugin (si no, es restauraria en reiniciar el mòbil).
     async function cancelScheduledNotification() {
         try {
             const LocalNotifications = getLocalNotificationsPlugin();
             if (LocalNotifications) {
-                await LocalNotifications.cancel({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
+                pauseEndNativeOk = false;
+                const ids = [{ id: NATIVE_ALARM_NOTIFICATION_ID }, { id: NATIVE_PAUSE_STATUS_NOTIFICATION_ID }];
+                await LocalNotifications.cancel({ notifications: ids });
                 try {
                     if (LocalNotifications.removeDeliveredNotifications) {
-                        await LocalNotifications.removeDeliveredNotifications({ notifications: [{ id: NATIVE_ALARM_NOTIFICATION_ID }] });
+                        await LocalNotifications.removeDeliveredNotifications({ notifications: ids });
                     }
                 } catch (e) {}
-                logActivity('🔕 Alarma nativa en segon pla cancel·lada');
+                logActivity('🔕 Notificacions de pausa cancel·lades');
             } else if (!isNativeApp && 'serviceWorker' in navigator) {
                 const registration = await getServiceWorkerRegistration(1500);
                 const worker = registration && (registration.active || navigator.serviceWorker.controller);
@@ -2005,7 +2115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             }
         } catch (error) {
-            logActivity(`❌ Error cancelando notificació: ${error.message}`);
+            logActivity(`❌ Error cancel·lant notificacions de pausa: ${error.message}`);
         }
     }
 
@@ -2018,7 +2128,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
 
-            // Sonido fuerte para alertas de pausa
+            // So curt de reserva per a l'avís de fi de pausa
             oscillator.frequency.value = 1000;
             oscillator.type = 'sine';
             gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
@@ -2032,19 +2142,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Notificació web. `new Notification()` llança "Illegal constructor" a Chrome per a Android
-    // (exigeix registration.showNotification) i, com que estava dins de playPauseAlarm abans
-    // del banner, l'excepció impedia mostrar el banner d'alarma.
+    // (exigeix registration.showNotification) i no ha de tallar mai el banner.
     async function showWebAlarmNotification(pauseType) {
         try {
             if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
             const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            const title = '⏰ Temps de pausa completat!';
+            const title = '⏰ Pausa acabada';
             const options = {
-                body: `Has completat els ${timeText} de ${pauseType}. Torna a la jornada laboral.`,
+                body: `Han passat els ${timeText} de ${pauseType}. Recorda finalitzar la pausa.`,
                 icon: '/icon-192.svg',
                 badge: '/icon-192.svg',
-                tag: 'pause-alarm',
-                requireInteraction: true,
+                tag: 'pause-end',
+                requireInteraction: false,
                 silent: false
             };
             const registration = await getServiceWorkerRegistration(1000);
@@ -2058,75 +2167,75 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function playPauseAlarm(pauseType, source = 'local') {
-        const now = new Date();
-        const timeSinceLastAlarm = appState.lastAlarmTime ? now - appState.lastAlarmTime : Infinity;
-
-        // L'alarma només té sentit durant una pausa (el SW o un temporitzador tardà podrien
-        // disparar-la quan la pausa ja ha acabat)
-        if (appState.currentState !== 'PAUSA') {
-            logActivity(`ℹ️ Alarma (${source}) ignorada: ja no hi ha cap pausa en curs`);
+    // Fi del temps de pausa: avís curt UNA sola vegada per pausa (no és una alarma que calgui aturar).
+    // Fonts: notificació nativa rebuda, temporitzador de sessió, service worker o el comptador de la UI.
+    function notifyPauseEnd(pauseType, source = 'local') {
+        // Només té sentit durant una pausa (el SW o un temporitzador tardà podrien arribar tard)
+        if (appState.currentState !== 'PAUSA' || pauseEndInFlight) {
+            logActivity(`ℹ️ Avís de fi de pausa (${source}) ignorat: ja no hi ha cap pausa en curs`);
             return;
         }
-
-        // Prevenir doble disparo si ya está sonando
-        if (appState.isAlarmPlaying) {
-            logActivity(`⚠️ Alarma ya activa, ignorando disparo desde ${source}`);
+        if (appState.pauseAlarmTriggered) {
+            logActivity(`ℹ️ Avís de fi de pausa ja donat, s'ignora (${source})`);
             return;
         }
+        appState.pauseAlarmTriggered = true;
+        appState.lastAlarmTime = new Date();
+        appState.alarmSource = source;
+        saveState();
 
-        // Permitir alarma si no se ha disparado o han pasado al menos 5 minutos
-        if (!appState.pauseAlarmTriggered || timeSinceLastAlarm > 5 * 60 * 1000) {
-            appState.pauseAlarmTriggered = true;
-            appState.isAlarmPlaying = true;
-            appState.lastAlarmTime = now;
-            appState.alarmSource = source;
-            saveState();
+        logActivity(`🔔 Fi de pausa detectada des de: ${source}`);
 
-            logActivity(`🔔 Alarma activada desde: ${source}`);
-
-            // 1. Vibración
+        const nativeHandlesSound = isNativeApp && pauseEndNativeOk;
+        if (nativeHandlesSound) {
+            if (source !== 'native-notification') {
+                // El temporitzador de l'app ha arribat abans que l'alarma d'Android (pot ser inexacta):
+                // es publica ARA la 1001 (substitueix la programada) => un sol so, puntual.
+                scheduleNotification(pauseType, 0).catch(() => {});
+            }
+        } else {
+            // Web, o APK sense avís natiu (permís denegat, canal silenciat...): so curt dins l'app
             try {
-                if ('vibrate' in navigator) {
-                    navigator.vibrate([1000, 300, 1000, 300, 1000]);
-                }
+                if ('vibrate' in navigator) navigator.vibrate([150, 100, 150, 100, 150]);
             } catch (e) {}
-
-            // 2. Reproduir so d'alarma
-            playAlarmAudio(pauseType);
-
-            // 3. Notificación web si no es nativa (mai ha de tallar el banner)
-            if (!isNativeApp) {
-                showWebAlarmNotification(pauseType);
-            }
-
-            // 4. Mostrar banner d'alarma prominent amb botó per aturar el so
-            const alarmBanner = document.getElementById('alarm-banner');
-            if (alarmBanner) {
-                alarmBanner.style.display = 'flex';
-                const subElem = document.getElementById('alarm-banner-sub');
-                if (subElem) {
-                    const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-                    subElem.textContent = `Temps de ${pauseType} completat (${timeText}). Prem el botó per silenciar el timbre.`;
-                }
-                const btnStopBanner = document.getElementById('btn-stop-alarm-banner');
-                if (btnStopBanner) {
-                    btnStopBanner.onclick = (e) => {
-                        e.stopPropagation();
-                        stopAlarm();
-                        logActivity('🔕 Alarma silenciada des del botó de l\'app');
-                    };
-                }
-            }
-
-            const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
-            logActivity(`🚨 ALARMA ${String(pauseType).toUpperCase()}: ${timeText} completats - TORNA A LA JORNADA`);
+            playPauseEndSound();
+            if (!isNativeApp) showWebAlarmNotification(pauseType);
         }
+
+        // La notificació "En pausa" passa a dir que el temps s'ha esgotat
+        if (isNativeApp) showPauseStatusNotification().catch(() => {});
+
+        // Banner informatiu dins l'app (es tanca amb "Entesos"; la pausa continua fins que l'usuari la finalitzi)
+        const timeText = pauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
+        const alarmBanner = document.getElementById('alarm-banner');
+        if (alarmBanner) {
+            alarmBanner.style.display = 'flex';
+            const subElem = document.getElementById('alarm-banner-sub');
+            if (subElem) {
+                subElem.textContent = `Temps de ${pauseType} completat (${timeText}). Recorda finalitzar la pausa.`;
+            }
+            const btnStopBanner = document.getElementById('btn-stop-alarm-banner');
+            if (btnStopBanner) {
+                btnStopBanner.onclick = (e) => {
+                    e.stopPropagation();
+                    dismissPauseEndBanner();
+                };
+            }
+        }
+
+        logActivity(`⏰ PAUSA ${String(pauseType).toUpperCase()}: ${timeText} completats - recorda tornar a la jornada`);
     }
 
+    // Només amaga el banner informatiu: la pausa i la notificació "En pausa" continuen
+    function dismissPauseEndBanner() {
+        const alarmBanner = document.getElementById('alarm-banner');
+        if (alarmBanner) alarmBanner.style.display = 'none';
+    }
+
+    // Neteja completa quan la pausa deixa d'existir: àudio, temporitzador, banner i notificacions 1001/1002
     function stopAlarm() {
         stopAlarmAudio();
-        cancelScheduledNotification(); // Treu la notificació de la safata de notificacions
+        cancelScheduledNotification(); // Treu les notificacions de pausa de la safata
         appState.isAlarmPlaying = false;
         appState.alarmSource = null;
 
@@ -2135,10 +2244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             alarmIntervalGlobal = null;
         }
 
-        const alarmBanner = document.getElementById('alarm-banner');
-        if (alarmBanner) {
-            alarmBanner.style.display = 'none';
-        }
+        dismissPauseEndBanner();
 
         const btnSilence = document.getElementById('btn-silence-alarm');
         if (btnSilence) {
@@ -2184,8 +2290,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
                     // Finestra estricta de 3 segons per no sonar retroactivament si s'obre més tard
                     if (currentPauseDuration >= pauseLimit && currentPauseDuration < pauseLimit + 3000) {
-                        if (!appState.isAlarmPlaying && !appState.pauseAlarmTriggered) {
-                            playPauseAlarm(appState.currentPauseType, 'timer-limit');
+                        if (!appState.pauseAlarmTriggered) {
+                            notifyPauseEnd(appState.currentPauseType, 'timer-limit');
                         }
                     }
                 }
@@ -2479,6 +2585,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     appState.currentPauseType = null;
                     appState.isAlarmPlaying = false;
                     appState.pauseAlarmTriggered = false;
+                    // La pausa ja no existeix: res d'avís programat ni notificació "En pausa"
+                    stopAlarm();
+                    releaseWakeLock();
                     saveState();
                     updateUI();
                     logActivity('🔧 Auto-correcció: Tornat a jornada normal');
@@ -2515,9 +2624,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     appState.isAlarmPlaying = false;
                     appState.pauseAlarmTriggered = false;
 
-                    // La pausa ja no existeix: res d'alarma programada, so ni pantalla encesa
-                    stopAlarmAudio();
-                    cancelScheduledNotification();
+                    // La pausa ja no existeix: res d'avís programat, notificació "En pausa", so ni pantalla encesa
+                    stopAlarm();
                     releaseWakeLock();
 
                     saveState();
@@ -2548,6 +2656,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // M7: un reset a FUERA ha de netejar TOT el que pertany a la jornada perduda; si queda la
     // pausa acumulada o l'horari del dia, contaminen la jornada següent.
     function resetToOutOfWorkday() {
+        // Si hi havia una pausa en curs, que no en quedin notificacions òrfenes a la safata
+        if (appState.currentState === 'PAUSA' || appState.currentPauseStart) {
+            stopAlarm();
+            releaseWakeLock();
+        }
         appState.currentState = 'FUERA';
         appState.workStartTime = null;
         appState.currentPauseStart = null;
@@ -2562,34 +2675,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         appState.workStartDay = null;
     }
 
-    // Si hi ha una pausa en curs en obrir l'app: tornar a demanar wake lock, reprogramar l'alarma amb el
-    // temps que falta (no el límit complet) i, si ja ha passat el límit, avisar visualment sense so retroactiu.
+    // Si hi ha una pausa en curs en obrir l'app: tornar a demanar wake lock, tornar a mostrar la notificació
+    // "En pausa", reprogramar l'avís de fi amb el temps que falta (no el límit complet) i, si ja ha passat el
+    // límit, avisar visualment sense so retroactiu.
     async function resumeActivePause() {
-        if (appState.currentState !== 'PAUSA' || !appState.currentPauseType) return;
+        // També surt si un "Finalitzar pausa" de la notificació (arrencada en fred) ja està tancant la pausa
+        if (!isPauseActive()) return;
         const timeText = appState.currentPauseType === 'esmorçar' ? '15 minuts' : '30 minuts';
 
         // Volver a activar wake lock si está en pausa
         await requestWakeLock();
-
-        if (!appState.currentPauseStart) return;
+        if (!isPauseActive()) {
+            await releaseWakeLock();
+            return;
+        }
+        if (isNativeApp) await showPauseStatusNotification();
         const elapsed = new Date() - appState.currentPauseStart;
         const pauseLimit = PAUSE_LIMITS[appState.currentPauseType];
         const remaining = pauseLimit - elapsed;
 
         if (remaining > 0) {
-            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa. Alarma programada a ${timeText}.`;
+            dom.infoMessage.textContent = `⏰ Pausa ${appState.currentPauseType} activa (${timeText}). Avís de fi de pausa programat.`;
             dom.infoMessage.classList.add('success');
 
             // Temporitzador d'aquesta sessió: amb el temps que FALTA, no el límit sencer
             startBackgroundAudioKeepAlive(appState.currentPauseType, remaining);
             const scheduled = await scheduleNotification(appState.currentPauseType, remaining);
+            if (!isPauseActive()) {
+                // La pausa s'ha tancat mentre es reprogramava: res de keep-alive ni temporitzador orfes
+                stopAlarmAudio();
+                return;
+            }
             if (scheduled.ok) {
                 logActivity(`🔔 Notificació reprogramada: ${Math.round(remaining/1000/60)} min restants`);
             } else {
-                showNotificationWarning(`⚠️ No s'ha pogut reprogramar l'alarma en segon pla (${describeScheduleFailure(scheduled.reason)}). Mantingues l'app oberta.`);
+                showNotificationWarning(`⚠️ No s'ha pogut reprogramar l'avís de fi de pausa en segon pla (${describeScheduleFailure(scheduled.reason)}). Mantingues l'app oberta.`);
             }
         } else {
-            // Si el temps de pausa ja ha passat fa estona, NO activar alarma sonora en iniciar l'app
+            // Si el temps de pausa ja ha passat fa estona, NO sona res en iniciar l'app
             logActivity(`ℹ️ La pausa de ${appState.currentPauseType} ja ha superat el temps previst (${timeText}).`);
             showPauseOverrunNotice();
         }
@@ -2674,47 +2797,42 @@ document.addEventListener('DOMContentLoaded', async () => {
                     // Escuchar mensajes del service worker
                     navigator.serviceWorker.addEventListener('message', event => {
                         if (event.data && event.data.type === 'PAUSE_ALARM') {
-                            logActivity('🔔 Alarma activada pel Service Worker');
-                            // 🐛 FIX #4: Pasar 'service-worker' como fuente
-                            playPauseAlarm(event.data.pauseType, 'service-worker');
-                        } else if (event.data && event.data.type === 'STOP_ALARM') {
-                            logActivity('🔕 Alarma silenciada des de la notificació');
-                            stopAlarm();
+                            logActivity('🔔 Fi de pausa avisada pel Service Worker');
+                            notifyPauseEnd(event.data.pauseType, 'service-worker');
                         }
                     });
                 })
                 .catch(err => logActivity(`❌ Error en registrar Service Worker: ${err}`));
         } else if (isNativeApp) {
-            logActivity('📱 Mode APK Nativa: Alarmes natives en segon pla (AlarmManager) activades');
+            logActivity('📱 Mode APK Nativa: notificació "En pausa" i avís de fi de pausa natius (AlarmManager)');
         }
 
         // Detectar quan l'app perd/guanya focus
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 if (isNativeApp) {
-                    logActivity('📱 App en segon pla: L\'alarma nativa sonarà exactament a la seva hora');
+                    logActivity('📱 App en segon pla: l\'avís de fi de pausa sonarà a la seva hora');
                 } else {
                     logActivity('⚠️ Web en segon pla: Mantingues el navegador obert');
                 }
             } else {
                 logActivity('📱 App en primer pla');
-                // ELIMINAT: No disparar alarma en tornar al primer pla (foreground-return)
-                // L'alarma només sona mitjançant el sistema de notificacions a la seva hora exacta.
+                // En tornar al primer pla NO sona res: l'avís només sona a la seva hora.
                 updateTimers();
-                // Sí que es verifica que l'alarma nativa segueix programada i, si la pausa ja
-                // ha superat el límit, es mostra un avís visual (sense so).
+                // Es verifica que la notificació "En pausa" i l'avís de fi segueixen actius i, si la
+                // pausa ja ha superat el límit, es mostra un avís visual (sense so).
                 ensurePauseAlarmScheduled().catch(() => {});
                 showPauseOverrunNotice();
             }
         });
 
         logActivity('🚀 Beta10 Control iniciat');
-        logActivity('✅ Sistema operatiu amb alarmes millorades');
+        logActivity('✅ Sistema operatiu amb avisos de pausa');
 
-        // Mostrar avís important sobre alarmes
+        // Mostrar avís important sobre el dia
         if (appState.currentState === 'FUERA') {
             setTimeout(() => {
-                // Si hi ha un avís de notificacions/alarma actiu, no es trepitja
+                // Si hi ha un avís de notificacions actiu, no es trepitja
                 if (notificationStatus.permission === 'denied' || notificationStatus.channelSilenced) return;
                 // 🆕 NUEVO: Mostrar información del día actual
                 const today = new Date();
@@ -2738,7 +2856,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 2000);
         }
 
-        // 🔔 M10: permisos de notificació, canal i reprogramació de l'alarma d'una pausa en curs.
+        // 🔔 M10: permisos de notificació, canals i reprogramació dels avisos d'una pausa en curs.
         // Al final i sense bloquejar la UI (ja pintada): el diàleg de permisos pot trigar minuts.
         try {
             await initNotifications();

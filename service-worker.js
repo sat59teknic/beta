@@ -1,5 +1,5 @@
 // Canviar CACHE_NAME en cada release que toqui fitxers de la llista: força el reinici del cache.
-const CACHE_NAME = 'beta10-v7-network-first';
+const CACHE_NAME = 'beta10-v8-network-first';
 
 // TOTS els fitxers locals que carrega index.html (i els recursos de l'app) han d'estar aquí perquè
 // l'app arrenqui sense connexió (M13). Hi ha un test que ho comprova contra index.html i el disc.
@@ -17,7 +17,7 @@ const urlsToCache = [
     '/db-ui.js',
     '/sql-wasm.js',
     '/sql-wasm.wasm',
-    '/alarm.wav',
+    '/pause_end.wav',
     '/silence.wav',
     '/manifest.json',
     '/icon-192.svg',
@@ -188,59 +188,35 @@ function cancelNotification() {
     }
 }
 
-// 🔔 Mostrar notificación del sistema
+// 🔔 Mostrar notificación del sistema: avís curt de fi de pausa (no és una alarma que calgui aturar)
 function showNotification(pauseType, timeLimit) {
-    const title = '⏰ Temps de pausa completat!';
-    const body = `Has completat els ${timeLimit} minuts de ${pauseType}. Torna a la jornada laboral.`;
-    
+    const title = '⏰ Pausa acabada';
+    const body = `Han passat els ${timeLimit} minuts de ${pauseType}. Recorda finalitzar la pausa.`;
+
     const options = {
         body: body,
         icon: '/icon-192.svg',
         badge: '/icon-192.svg',
-        tag: 'pause-alarm',
-        requireInteraction: true,
-        renotify: true,
+        tag: 'pause-end',
+        requireInteraction: false,
         silent: false,
-        sound: '/alarm.wav',
-        vibrate: [800, 200, 800, 200, 800, 200, 1200, 300, 1200],
-        actions: [
-            {
-                action: 'silence',
-                title: '🔕 Silenciar Alarma',
-                icon: '/icon-192.svg'
-            },
-            {
-                action: 'return-to-work',
-                title: '▶️ Tornar a la jornada',
-                icon: '/icon-192.svg'
-            }
-        ],
+        vibrate: [150, 100, 150, 100, 150],
         data: {
             pauseType: pauseType,
             timeLimit: timeLimit,
             url: '/'
         }
     };
-    
+
     self.registration.showNotification(title, options);
 }
 
-// 🔔 Manejar clics en notificaciones
+// 🔔 Manejar clics en notificaciones: obrir o enfocar l'app
 self.addEventListener('notificationclick', event => {
     console.log('🔔 Notificación clickeada:', event.notification.tag, 'Acción:', event.action);
-    
+
     event.notification.close();
-    
-    // Si l'usuari clica expressament a "Silenciar Alarma"
-    if (event.action === 'silence') {
-        self.clients.matchAll().then(clients => {
-            clients.forEach(client => {
-                client.postMessage({ type: 'STOP_ALARM' });
-            });
-        });
-        return;
-    }
-    
+
     // Abrir o enfocar la app
     event.waitUntil(
         self.clients.matchAll().then(clients => {
@@ -259,15 +235,4 @@ self.addEventListener('notificationclick', event => {
     );
 });
 
-// 🔔 Manejar cierre de notificaciones (lliscament/descartat)
-self.addEventListener('notificationclose', event => {
-    console.log('🔕 Notificación cerrada o descartada:', event.notification.tag);
-    // Quan l'usuari descarta la notificació, silenciar l'alarma
-    self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-            client.postMessage({ type: 'STOP_ALARM' });
-        });
-    });
-});
-
-console.log('✅ Service Worker: Cargado con soporte para alarmas');
+console.log('✅ Service Worker: Cargado con soporte de avisos de pausa');

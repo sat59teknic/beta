@@ -116,7 +116,7 @@ module.exports = function registerFixesPlatformTests(runner) {
             assertDeepEqual(missing, [], 'sin cachear (la app no arrancaria offline)');
             const absent = sw.urlsToCache.filter(u => u !== '/' && !fs.existsSync(path.join(ROOT, u)));
             assertDeepEqual(absent, [], 'entradas de la cache que no existen en disco');
-            for (const must of ['/alarm.wav', '/silence.wav', '/sql-wasm.wasm', '/auth.js', '/beta10-direct.js']) {
+            for (const must of ['/pause_end.wav', '/silence.wav', '/sql-wasm.wasm', '/auth.js', '/beta10-direct.js']) {
                 assert(sw.urlsToCache.includes(must), must);
             }
         });
@@ -165,8 +165,8 @@ module.exports = function registerFixesPlatformTests(runner) {
 
         suite.test('M13 audio/wasm/iconos: CACHE PRIMERO (no se descargan de nuevo) y se guardan al primer uso', async () => {
             const sw = loadServiceWorker({ fetch: async () => ok('DE RED') });
-            sw.getCache(sw.cacheName).set(ORIGIN + '/alarm.wav', ok('CACHEADO'));
-            assertEqual((await sw.request('/alarm.wav')).body, 'CACHEADO');
+            sw.getCache(sw.cacheName).set(ORIGIN + '/pause_end.wav', ok('CACHEADO'));
+            assertEqual((await sw.request('/pause_end.wav')).body, 'CACHEADO');
             assertEqual(sw.fetchLog.length, 0, 'sin ir a la red');
             assertEqual((await sw.request('/silence.wav')).body, 'DE RED');
             await flush(5);
@@ -228,7 +228,7 @@ android {
             fs.writeFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), manifest);
             fs.writeFileSync(path.join(dir, 'android/app/build.gradle'), gradle);
             if (keystore) fs.copyFileSync(path.join(ROOT, 'debug.keystore'), path.join(dir, 'debug.keystore'));
-            if (alarm) fs.copyFileSync(path.join(ROOT, 'alarm.wav'), path.join(dir, 'alarm.wav'));
+            if (alarm) fs.copyFileSync(path.join(ROOT, 'pause_end.wav'), path.join(dir, 'pause_end.wav'));
             return dir;
         }
         const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
@@ -244,9 +244,9 @@ android {
             } finally { fs.rmSync(dir, { recursive: true, force: true }); }
         });
 
-        suite.test('prepare-android falla si falta alarm.wav (el canal se crearia mudo) o el manifest/gradle', async () => {
+        suite.test('prepare-android falla si falta pause_end.wav (el canal sonaria con el sonido por defecto) o el manifest/gradle', async () => {
             let dir = makeProject({ alarm: false });
-            try { assert(/alarm\.wav/.test((() => { try { prepare.prepareAndroid(dir, quietLog); } catch (e) { return e.message; } return ''; })())); }
+            try { assert(/pause_end\.wav/.test((() => { try { prepare.prepareAndroid(dir, quietLog); } catch (e) { return e.message; } return ''; })())); }
             finally { fs.rmSync(dir, { recursive: true, force: true }); }
             dir = fs.mkdtempSync(path.join(os.tmpdir(), 'beta10-android-'));
             try {
@@ -288,12 +288,16 @@ android {
             } finally { fs.rmSync(dir, { recursive: true, force: true }); }
         });
 
-        suite.test('Sonido e icono: alarm.wav va a res/raw (identico) y se crea el drawable monocromo ic_stat_pause_alarm', async () => {
+        suite.test('Sonido e icono: pause_end.wav va a res/raw (identico), se borra el alarm.wav antiguo y se crea el drawable monocromo ic_stat_pause_alarm', async () => {
             const dir = makeProject();
             try {
+                fs.mkdirSync(path.join(dir, 'android/app/src/main/res/raw'), { recursive: true });
+                fs.writeFileSync(path.join(dir, 'android/app/src/main/res/raw/alarm.wav'), 'viejo');
                 prepare.prepareAndroid(dir, quietLog);
-                const raw = fs.readFileSync(path.join(dir, 'android/app/src/main/res/raw/alarm.wav'));
-                assert(Buffer.compare(raw, fs.readFileSync(path.join(ROOT, 'alarm.wav'))) === 0, 'mismo fichero');
+                const raw = fs.readFileSync(path.join(dir, 'android/app/src/main/res/raw/pause_end.wav'));
+                assert(Buffer.compare(raw, fs.readFileSync(path.join(ROOT, 'pause_end.wav'))) === 0, 'mismo fichero');
+                assert(!fs.existsSync(path.join(dir, 'android/app/src/main/res/raw/alarm.wav')), 'alarm.wav antiguo eliminado');
+                assertEqual(prepare.PAUSE_END_SOUND, 'pause_end.wav');
                 const xml = read(dir, `android/app/src/main/res/drawable/${prepare.NOTIFICATION_ICON_NAME}.xml`);
                 assert(xml.includes('<vector') && xml.includes('#FFFFFFFF'), 'vector blanco (monocromo)');
                 assertEqual(prepare.NOTIFICATION_ICON_NAME, 'ic_stat_pause_alarm');
@@ -367,12 +371,12 @@ android {
             const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
             const refs = Array.from(html.matchAll(/(?:src|href)="([^"#]+)"/g)).map(m => m[1]).filter(u => !/^(?:https?:)?\/\//.test(u));
             assertDeepEqual(refs.filter(r => !listed.includes(r)), []);
-            for (const f of ['alarm.wav', 'silence.wav']) assert(listed.includes(f), f);
+            for (const f of ['pause_end.wav', 'silence.wav']) assert(listed.includes(f), f);
         });
 
-        suite.test('El proyecto trae debug.keystore y alarm.wav (requisitos duros de prepare-android)', async () => {
+        suite.test('El proyecto trae debug.keystore y pause_end.wav (requisitos duros de prepare-android)', async () => {
             assert(fs.statSync(path.join(ROOT, 'debug.keystore')).size > 0);
-            assert(fs.statSync(path.join(ROOT, 'alarm.wav')).size > 1000);
+            assert(fs.statSync(path.join(ROOT, 'pause_end.wav')).size > 1000);
         });
     });
 

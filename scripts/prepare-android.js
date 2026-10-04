@@ -1,8 +1,8 @@
-// scripts/prepare-android.js - Configura permisos, so d'alarma, icona de notificació i signatura
+// scripts/prepare-android.js - Configura permisos, so de fi de pausa, icona de notificació i signatura
 // al projecte natiu generat per `npx cap add android` / `npx cap sync android`.
 //
 // És idempotent (es pot executar abans de cada build) i FALLA amb codi de sortida 1 si falta
-// qualsevol peça crítica (manifest, debug.keystore, alarm.wav): abans, sense debug.keystore
+// qualsevol peça crítica (manifest, debug.keystore, pause_end.wav): abans, sense debug.keystore
 // l'APK es construïa en silenci amb una signatura aleatòria i l'actualització sobre una
 // instal·lació existent fallava ("app no instal·lada").
 //
@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// POST_NOTIFICATIONS (Android 13+) i alarmes exactes són imprescindibles per a l'alarma de pausa.
+// POST_NOTIFICATIONS (Android 13+) i alarmes exactes són imprescindibles per a l'avís de fi de pausa.
 const REQUIRED_PERMISSIONS = [
     'android.permission.INTERNET',
     'android.permission.ACCESS_NETWORK_STATE',
@@ -28,6 +28,8 @@ const REQUIRED_PERMISSIONS = [
 // silueta alfa). 'ic_launcher_round' és un mipmap de color i, a més, el plugin només busca a
 // drawable/, de manera que queia a la icona genèrica d'Android.
 const NOTIFICATION_ICON_NAME = 'ic_stat_pause_alarm';
+// So del canal "Fi de pausa" (CLINK CLINK CLINK). Generat per scripts/generate-pause-sound.js.
+const PAUSE_END_SOUND = 'pause_end.wav';
 const NOTIFICATION_ICON_XML = `<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -131,7 +133,7 @@ function prepareAndroid(rootDir = path.resolve(__dirname, '..'), log = console) 
     const gradlePath = path.join(rootDir, 'android/app/build.gradle');
     const keystoreSrc = path.join(rootDir, 'debug.keystore');
     const keystoreDest = path.join(rootDir, 'android/app/debug.keystore');
-    const srcAlarm = path.join(rootDir, 'alarm.wav');
+    const srcSound = path.join(rootDir, PAUSE_END_SOUND);
 
     // --- Comprovacions prèvies: res no es modifica si falta una peça crítica ---
     if (!fs.existsSync(manifestPath)) {
@@ -140,8 +142,8 @@ function prepareAndroid(rootDir = path.resolve(__dirname, '..'), log = console) 
     if (!fs.existsSync(keystoreSrc)) {
         throw new Error(`No s'ha trobat debug.keystore a: ${keystoreSrc}. Sense el keystore fix, l'APK se signaria amb una clau aleatòria i NO es podria actualitzar sobre la instal·lació existent.`);
     }
-    if (!fs.existsSync(srcAlarm)) {
-        throw new Error(`No s'ha trobat alarm.wav a: ${srcAlarm}. Sense aquest so, el canal de notificacions es crearia mut.`);
+    if (!fs.existsSync(srcSound)) {
+        throw new Error(`No s'ha trobat ${PAUSE_END_SOUND} a: ${srcSound} (genera'l amb "node scripts/generate-pause-sound.js"). Sense aquest so, el canal de fi de pausa sonaria amb el so per defecte.`);
     }
     if (!fs.existsSync(gradlePath)) {
         throw new Error(`No s'ha trobat build.gradle a: ${gradlePath}`);
@@ -158,11 +160,13 @@ function prepareAndroid(rootDir = path.resolve(__dirname, '..'), log = console) 
     if (cleartext.changed) log.log('✅ usesCleartextTraffic desactivat (només HTTPS).');
     log.log('✅ AndroidManifest.xml actualitzat amb èxit!');
 
-    // --- So d'alarma a res/raw ---
+    // --- So de fi de pausa a res/raw (l'antic alarm.wav ja no s'usa) ---
     const rawDir = path.join(resDir, 'raw');
     fs.mkdirSync(rawDir, { recursive: true });
-    fs.copyFileSync(srcAlarm, path.join(rawDir, 'alarm.wav'));
-    log.log('✅ alarm.wav copiat a res/raw per al timbre de la notificació nativa.');
+    fs.copyFileSync(srcSound, path.join(rawDir, PAUSE_END_SOUND));
+    const legacyAlarm = path.join(rawDir, 'alarm.wav');
+    if (fs.existsSync(legacyAlarm)) fs.unlinkSync(legacyAlarm);
+    log.log(`✅ ${PAUSE_END_SOUND} copiat a res/raw per al so de la notificació de fi de pausa.`);
 
     // --- Icona monocroma de la notificació ---
     const drawableDir = path.join(resDir, 'drawable');
@@ -190,7 +194,8 @@ module.exports = {
     disableCleartext,
     ensureSigningInGradle,
     REQUIRED_PERMISSIONS,
-    NOTIFICATION_ICON_NAME
+    NOTIFICATION_ICON_NAME,
+    PAUSE_END_SOUND
 };
 
 if (require.main === module) {

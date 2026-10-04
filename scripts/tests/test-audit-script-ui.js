@@ -242,8 +242,8 @@ module.exports = function registerAuditScriptUiTests(runner) {
                 currentPauseType: 'dinar', isAlarmPlaying: true
             })));
             const app = await loadScriptApp({ storage, clock });
-            app.t.playPauseAlarm('dinar', 'native-notification');
-            assertEqual(app.el('alarm-banner').style.display, 'flex', 'el banner de alarma debe mostrarse; la alarma se ignora por un isAlarmPlaying obsoleto');
+            app.t.notifyPauseEnd('dinar', 'native-notification');
+            assertEqual(app.el('alarm-banner').style.display, 'flex', 'el banner de fin de pausa debe mostrarse; el aviso se ignora por un isAlarmPlaying obsoleto');
         });
 
         suite.test('M14 control: con isAlarmPlaying=false guardado, la alarma de pausa si suena al reabrir (banner visible)', async () => {
@@ -254,9 +254,9 @@ module.exports = function registerAuditScriptUiTests(runner) {
                 currentPauseType: 'dinar', isAlarmPlaying: false
             })));
             const app = await loadScriptApp({ storage, clock });
-            app.t.playPauseAlarm('dinar', 'native-notification');
+            app.t.notifyPauseEnd('dinar', 'native-notification');
             assertEqual(app.el('alarm-banner').style.display, 'flex');
-            assertEqual(app.t.getState().isAlarmPlaying, true);
+            assertEqual(app.t.getState().pauseAlarmTriggered, true);
         });
 
         suite.test('M14 control: saveState/loadState conservan los campos de negocio (fechas como Date)', async () => {

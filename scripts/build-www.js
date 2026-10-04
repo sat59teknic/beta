@@ -22,7 +22,7 @@ const filesToCopy = [
     'db-ui.js',
     'sql-wasm.js',
     'sql-wasm.wasm',
-    'alarm.wav',
+    'pause_end.wav',
     'silence.wav'
 ];
 
